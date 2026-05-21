@@ -267,6 +267,7 @@ export default function DashboardLayout() {
               error={upload.error}
               bytesPerSecond={upload.bytesPerSecond}
               estimatedSecondsRemaining={upload.estimatedSecondsRemaining}
+              resuming={upload.resuming}
               onCancel={() => cancelUpload(upload.id)}
             />
           ))}

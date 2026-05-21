@@ -84,6 +84,7 @@ export default defineSchema({
     ),
     // Metadata
     s3Key: v.optional(v.string()),
+    s3MultipartUploadId: v.optional(v.string()),
     duration: v.optional(v.number()),
     thumbnailUrl: v.optional(v.string()),
     fileSize: v.optional(v.number()),

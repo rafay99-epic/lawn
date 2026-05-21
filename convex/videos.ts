@@ -327,10 +327,12 @@ export const setUploadInfo = internalMutation({
     s3Key: v.string(),
     fileSize: v.number(),
     contentType: v.string(),
+    s3MultipartUploadId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.videoId, {
       s3Key: args.s3Key,
+      s3MultipartUploadId: args.s3MultipartUploadId,
       muxUploadId: undefined,
       muxAssetId: undefined,
       muxPlaybackId: undefined,
@@ -424,6 +426,17 @@ export const markAsFailed = internalMutation({
       muxAssetStatus: "errored",
       uploadError: args.uploadError,
       status: "failed",
+    });
+  },
+});
+
+export const clearMultipartUploadId = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      s3MultipartUploadId: undefined,
     });
   },
 });

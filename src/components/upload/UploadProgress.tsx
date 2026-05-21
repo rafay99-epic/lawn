@@ -27,6 +27,7 @@ interface UploadProgressProps {
   error?: string;
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
+  resuming?: boolean;
   onCancel?: () => void;
 }
 
@@ -38,6 +39,7 @@ export function UploadProgress({
   error,
   bytesPerSecond = 0,
   estimatedSecondsRemaining = null,
+  resuming = false,
   onCancel,
 }: UploadProgressProps) {
   return (
@@ -45,7 +47,10 @@ export function UploadProgress({
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <p className="font-bold text-[#1a1a1a] truncate text-sm">{fileName}</p>
-          <p className="text-xs text-[#888] mt-0.5">{formatBytes(fileSize)}</p>
+          <p className="text-xs text-[#888] mt-0.5">
+            {formatBytes(fileSize)}
+            {resuming ? " · Resuming" : ""}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {status === "complete" && (

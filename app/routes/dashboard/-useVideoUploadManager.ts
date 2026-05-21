@@ -3,6 +3,13 @@ import { useCallback, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import type { UploadStatus } from "@/components/upload/UploadProgress";
+import { buildFileFingerprint, isFileTooLarge, formatMaxUploadSize } from "@/lib/uploadLimits";
+import {
+  deleteUploadResumeSession,
+  findUploadResumeSessionByFingerprint,
+  loadUploadResumeSession,
+} from "@/lib/uploadResumeDb";
+import { uploadVideoFile } from "@/lib/videoUpload";
 
 export interface ManagedUploadItem {
   id: string;
@@ -15,6 +22,7 @@ export interface ManagedUploadItem {
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
   abortController?: AbortController;
+  resuming?: boolean;
 }
 
 function createUploadId() {
@@ -26,10 +34,20 @@ function createUploadId() {
 
 export function useVideoUploadManager() {
   const createVideo = useMutation(api.videos.create);
-  const getUploadUrl = useAction(api.videoActions.getUploadUrl);
+  const initiateVideoUpload = useAction(api.videoActions.initiateVideoUpload);
+  const signUploadParts = useAction(api.videoActions.signUploadParts);
+  const completeMultipartUpload = useAction(api.videoActions.completeMultipartUpload);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
   const markUploadFailed = useAction(api.videoActions.markUploadFailed);
+  const abortVideoUpload = useAction(api.videoActions.abortVideoUpload);
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
+
+  const uploadActions = {
+    initiateVideoUpload,
+    signUploadParts,
+    completeMultipartUpload,
+    markUploadComplete,
+  };
 
   const uploadFilesToProject = useCallback(
     async (projectId: Id<"projects">, files: File[]) => {
@@ -37,6 +55,25 @@ export function useVideoUploadManager() {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
+        const fingerprint = buildFileFingerprint(file);
+
+        if (isFileTooLarge(file.size)) {
+          setUploads((prev) => [
+            ...prev,
+            {
+              id: uploadId,
+              projectId,
+              file,
+              progress: 0,
+              status: "error",
+              error: `Video file is too large. Maximum size is ${formatMaxUploadSize()}.`,
+              abortController,
+            },
+          ]);
+          continue;
+        }
+
+        const existingResume = await findUploadResumeSessionByFingerprint(fingerprint);
 
         setUploads((prev) => [
           ...prev,
@@ -47,109 +84,64 @@ export function useVideoUploadManager() {
             progress: 0,
             status: "pending",
             abortController,
+            resuming: Boolean(existingResume),
           },
         ]);
 
-        let createdVideoId: Id<"videos"> | undefined;
+        let createdVideoId: Id<"videos"> | undefined = existingResume?.videoId;
 
         try {
-          createdVideoId = await createVideo({
-            projectId,
-            title,
-            fileSize: file.size,
-            contentType: file.type || "video/mp4",
-          });
+          if (!createdVideoId) {
+            createdVideoId = await createVideo({
+              projectId,
+              title,
+              fileSize: file.size,
+              contentType: file.type || "video/mp4",
+            });
+          }
+
+          const resumeSession =
+            (await loadUploadResumeSession(createdVideoId)) ?? existingResume;
 
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
-                ? { ...upload, videoId: createdVideoId, status: "uploading" }
+                ? {
+                    ...upload,
+                    videoId: createdVideoId,
+                    status: "uploading",
+                    resuming: Boolean(resumeSession),
+                  }
                 : upload,
             ),
           );
 
-          const { url } = await getUploadUrl({
+          await uploadVideoFile({
+            file,
             videoId: createdVideoId,
-            filename: file.name,
-            fileSize: file.size,
-            contentType: file.type || "video/mp4",
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            let lastTime = Date.now();
-            let lastLoaded = 0;
-            const recentSpeeds: number[] = [];
-
-            xhr.upload.addEventListener("progress", (event) => {
-              if (!event.lengthComputable) return;
-
-              const percentage = Math.round((event.loaded / event.total) * 100);
-              const now = Date.now();
-              const timeDelta = (now - lastTime) / 1000;
-              const bytesDelta = event.loaded - lastLoaded;
-
-              if (timeDelta > 0.1) {
-                const speed = bytesDelta / timeDelta;
-                recentSpeeds.push(speed);
-                if (recentSpeeds.length > 5) recentSpeeds.shift();
-                lastTime = now;
-                lastLoaded = event.loaded;
-              }
-
-              const avgSpeed =
-                recentSpeeds.length > 0
-                  ? recentSpeeds.reduce((sum, speed) => sum + speed, 0) /
-                    recentSpeeds.length
-                  : 0;
-              const remaining = event.total - event.loaded;
-              const eta = avgSpeed > 0 ? Math.ceil(remaining / avgSpeed) : null;
-
+            actions: uploadActions,
+            signal: abortController.signal,
+            resumeSession,
+            onProgress: (update) => {
               setUploads((prev) =>
                 prev.map((upload) =>
                   upload.id === uploadId
                     ? {
                         ...upload,
-                        progress: percentage,
-                        bytesPerSecond: avgSpeed,
-                        estimatedSecondsRemaining: eta,
+                        progress: update.progress,
+                        bytesPerSecond: update.bytesPerSecond,
+                        estimatedSecondsRemaining: update.estimatedSecondsRemaining,
                       }
                     : upload,
                 ),
               );
-            });
-
-            xhr.addEventListener("load", () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-                return;
-              }
-              reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
-            });
-
-            xhr.addEventListener("error", () => {
-              reject(new Error("Upload failed: Network error"));
-            });
-
-            xhr.addEventListener("abort", () => {
-              reject(new Error("Upload cancelled"));
-            });
-
-            abortController.signal.addEventListener("abort", () => {
-              xhr.abort();
-            });
-
-            xhr.open("PUT", url);
-            xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-            xhr.send(file);
+            },
           });
-
-          await markUploadComplete({ videoId: createdVideoId });
 
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
-                ? { ...upload, status: "complete", progress: 100 }
+                ? { ...upload, status: "complete", progress: 100, resuming: false }
                 : upload,
             ),
           );
@@ -160,22 +152,33 @@ export function useVideoUploadManager() {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : "Upload failed";
+          const cancelled = errorMessage === "Upload cancelled";
 
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
-                ? { ...upload, status: "error", error: errorMessage }
+                ? {
+                    ...upload,
+                    status: cancelled ? "pending" : "error",
+                    error: cancelled ? undefined : errorMessage,
+                  }
                 : upload,
             ),
           );
 
-          if (createdVideoId) {
-            markUploadFailed({ videoId: createdVideoId }).catch(console.error);
+          if (cancelled) {
+            setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
           }
         }
       }
     },
-    [createVideo, getUploadUrl, markUploadComplete, markUploadFailed],
+    [
+      createVideo,
+      initiateVideoUpload,
+      signUploadParts,
+      completeMultipartUpload,
+      markUploadComplete,
+    ],
   );
 
   const cancelUpload = useCallback(
@@ -185,11 +188,13 @@ export function useVideoUploadManager() {
         upload.abortController.abort();
       }
       if (upload?.videoId) {
+        abortVideoUpload({ videoId: upload.videoId }).catch(console.error);
+        deleteUploadResumeSession(upload.videoId).catch(console.error);
         markUploadFailed({ videoId: upload.videoId }).catch(console.error);
       }
       setUploads((prev) => prev.filter((item) => item.id !== uploadId));
     },
-    [uploads, markUploadFailed],
+    [uploads, abortVideoUpload, markUploadFailed],
   );
 
   return {

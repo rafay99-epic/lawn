@@ -1,0 +1,21 @@
+export const GIBIBYTE = 1024 ** 3;
+export const MEBIBYTE = 1024 ** 2;
+
+export const MAX_VIDEO_FILE_SIZE_BYTES = 30 * GIBIBYTE;
+export const SINGLE_PUT_MAX_BYTES = 5 * GIBIBYTE;
+export const MULTIPART_PART_SIZE_BYTES = 64 * MEBIBYTE;
+
+export const PRESIGN_SINGLE_PUT_EXPIRES_SEC = 3600;
+export const PRESIGN_PART_EXPIRES_SEC = 86400;
+export const MAX_SIGN_PARTS_BATCH = 20;
+
+export function computePartCount(fileSize: number, partSize = MULTIPART_PART_SIZE_BYTES) {
+  if (!Number.isFinite(fileSize) || fileSize <= 0) {
+    throw new Error("Video file size must be greater than zero.");
+  }
+  return Math.ceil(fileSize / partSize);
+}
+
+export function usesMultipartUpload(fileSize: number) {
+  return fileSize > SINGLE_PUT_MAX_BYTES;
+}
