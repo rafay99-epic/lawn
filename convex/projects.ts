@@ -325,6 +325,17 @@ export const move = mutation({
       if (newParent.teamId !== project.teamId) {
         throw new Error("Can't move a folder to a different team");
       }
+      // Keep the moved folder itself within the depth limit (cheap O(depth)
+      // walk, same as create). We deliberately do NOT also validate the moved
+      // subtree's height: that is an unbounded read that could exceed Convex's
+      // per-transaction index-range limit, and every descendant was created
+      // under this same limit, so the tree stays shallow in practice.
+      const newParentDepth = (await collectAncestors(ctx, newParent)).length;
+      if (newParentDepth + 1 > MAX_FOLDER_DEPTH) {
+        throw new Error(
+          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
+        );
+      }
       // Reject moving into one of the folder's own descendants.
       let current: Doc<"projects"> | null = newParent;
       let steps = 0;

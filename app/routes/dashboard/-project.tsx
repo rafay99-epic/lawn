@@ -199,6 +199,8 @@ export default function ProjectPage({
     context === undefined ||
     project === undefined ||
     videos === undefined ||
+    childFolders === undefined ||
+    breadcrumb === undefined ||
     shouldCanonicalize;
 
   const handleFilesSelected = useCallback(

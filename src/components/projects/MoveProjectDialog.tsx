@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -32,6 +32,11 @@ export function MoveProjectDialog({
   const move = useMutation(api.projects.move);
   const [isMoving, setIsMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Clear a stale error when the dialog is reopened for another folder.
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open, project?._id]);
 
   // The folder being moved and all of its descendants are invalid destinations.
   const excludedIds = useMemo(() => {

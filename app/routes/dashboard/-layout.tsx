@@ -291,7 +291,12 @@ export default function DashboardLayout() {
                   className="w-full px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors"
                   onClick={() => handleProjectSelected(target.projectId)}
                 >
-                  <p className="font-bold text-[#1a1a1a]">{target.projectPath}</p>
+                  <p
+                    className="font-bold text-[#1a1a1a] truncate"
+                    title={target.projectPath}
+                  >
+                    {target.projectPath}
+                  </p>
                   <p className="text-xs text-[#888]">{target.teamName}</p>
                 </button>
               ))}
