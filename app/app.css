@@ -204,6 +204,12 @@ body {
   color: var(--foreground-inverse);
 }
 
+[class~="bg-[#2d5a2d]"]::selection,
+[class~="bg-[#2d5a2d]"] *::selection {
+  background: var(--foreground-inverse);
+  color: var(--accent);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
