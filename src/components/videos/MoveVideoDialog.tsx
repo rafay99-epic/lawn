@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import {
@@ -9,60 +9,53 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
-import { collectDescendantIds } from "@/lib/folderTree";
-import { Home } from "lucide-react";
+import { useMoveActions } from "@/lib/dnd/useMoveActions";
 
-type MoveProjectDialogProps = {
+type MoveVideoDialogProps = {
   teamId: Id<"teams">;
-  project: { _id: Id<"projects">; name: string } | null;
+  /** The video being moved, plus its current folder so we can exclude it. */
+  video:
+    | { _id: Id<"videos">; title: string; projectId: Id<"projects"> }
+    | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-export function MoveProjectDialog({
+export function MoveVideoDialog({
   teamId,
-  project,
+  video,
   open,
   onOpenChange,
-}: MoveProjectDialogProps) {
+}: MoveVideoDialogProps) {
   const folders = useQuery(
     api.projects.listForMove,
     open ? { teamId } : "skip",
   );
-  const move = useMutation(api.projects.move);
+  const { moveVideoTo } = useMoveActions();
   const [isMoving, setIsMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Clear a stale error when the dialog is reopened for another folder.
+  // Clear a stale error when the dialog is reopened for another video.
   useEffect(() => {
     if (open) setError(null);
-  }, [open, project?._id]);
+  }, [open, video?._id]);
 
-  // The folder being moved and all of its descendants are invalid destinations.
-  const excludedIds = useMemo(() => {
-    if (!project || !folders) return new Set<Id<"projects">>();
-    return collectDescendantIds(project._id, folders);
-  }, [folders, project]);
-
+  // A video can move into any folder except the one it already lives in.
   const destinations = useMemo(
-    () => (folders ?? []).filter((folder) => !excludedIds.has(folder._id)),
-    [folders, excludedIds],
+    () => (folders ?? []).filter((folder) => folder._id !== video?.projectId),
+    [folders, video?.projectId],
   );
 
-  const handleMove = async (newParentId?: Id<"projects">) => {
-    if (!project) return;
+  const handleMove = async (destProjectId: Id<"projects">) => {
+    if (!video) return;
     setIsMoving(true);
     setError(null);
-    try {
-      await move({ projectId: project._id, newParentId });
+    const result = await moveVideoTo(video._id, destProjectId);
+    setIsMoving(false);
+    if (result.ok) {
       onOpenChange(false);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to move folder",
-      );
-    } finally {
-      setIsMoving(false);
+    } else {
+      setError(result.error ?? "Failed to move video");
     }
   };
 
@@ -70,9 +63,9 @@ export function MoveProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Move {project ? `"${project.name}"` : "folder"}</DialogTitle>
+          <DialogTitle>Move {video ? `"${video.title}"` : "video"}</DialogTitle>
           <DialogDescription>
-            Choose where this folder and everything inside it should live.
+            Choose which folder this video should live in.
           </DialogDescription>
         </DialogHeader>
 
@@ -86,17 +79,6 @@ export function MoveProjectDialog({
           <p className="text-sm text-[#888]">Loading folders...</p>
         ) : (
           <div className="max-h-80 overflow-y-auto border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
-            <button
-              type="button"
-              disabled={isMoving}
-              className={cn(
-                "flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors disabled:opacity-50",
-              )}
-              onClick={() => handleMove(undefined)}
-            >
-              <Home className="h-4 w-4 text-[#888]" />
-              <span className="font-bold text-[#1a1a1a]">Top level</span>
-            </button>
             {destinations.map((folder) => (
               <button
                 key={folder._id}

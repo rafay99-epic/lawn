@@ -29,6 +29,9 @@ import { ProjectCard } from "@/components/projects/ProjectCard";
 import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
 import { useTeamData } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { useMoveActions } from "@/lib/dnd/useMoveActions";
+import { useFolderDropTarget } from "@/lib/dnd/useFolderDropTarget";
+import type { DragPayload } from "@/lib/dnd/payload";
 
 export default function TeamPage() {
   const params = useParams({ strict: false });
@@ -39,6 +42,32 @@ export default function TeamPage() {
   const { context, team, projects, billing } = useTeamData({ teamSlug });
   const createProject = useMutation(api.projects.create);
   const deleteProject = useMutation(api.projects.remove);
+  const { moveFromDrop } = useMoveActions();
+  const [dndError, setDndError] = useState<string | null>(null);
+
+  const handleDropMove = (payload: DragPayload, destProjectId?: Id<"projects">) => {
+    void moveFromDrop(payload, destProjectId).then((result) => {
+      setDndError(result.error ?? null);
+    });
+  };
+
+  // Auto-dismiss the drop error, matching the share-toast behavior.
+  useEffect(() => {
+    if (!dndError) return;
+    const timeout = window.setTimeout(() => setDndError(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [dndError]);
+
+  // Empty background of the team grid = move a folder to the top level.
+  const teamId = team?._id;
+  const canCreateProjectRef = team?.role !== "viewer";
+  const { ref: gridDropRef, isDraggedOver: gridDraggedOver, canDropHere: gridCanDrop } =
+    useFolderDropTarget<HTMLDivElement>({
+      disabled: !teamId || !canCreateProjectRef,
+      targetProjectId: undefined, // top level
+      teamId: teamId as Id<"teams">,
+      onMove: (payload) => handleDropMove(payload, undefined),
+    });
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
@@ -209,10 +238,15 @@ export default function TeamPage() {
             </Card>
           </div>
         ) : (
-          <div className={cn(
-            "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity duration-300",
-            isLoadingData ? "opacity-0" : "opacity-100"
-          )}>
+          <div
+            ref={gridDropRef}
+            className={cn(
+              "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity duration-300",
+              isLoadingData ? "opacity-0" : "opacity-100",
+              gridDraggedOver && gridCanDrop &&
+                "outline-2 outline-dashed outline-[#2d5a2d] outline-offset-4",
+            )}
+          >
             {projects?.map((project) => (
               <ProjectCard
                 key={project._id}
@@ -223,11 +257,37 @@ export default function TeamPage() {
                 }
                 onDelete={canCreateProject ? handleDeleteProject : undefined}
                 onMove={canCreateProject ? (p) => setMoveTarget(p) : undefined}
+                dnd={
+                  teamId
+                    ? {
+                        teamId,
+                        currentParentId: undefined,
+                        // `folders` is intentionally omitted: the team root only
+                        // renders root folders, so a folder's own descendants are
+                        // never visible here as drop targets. `projects.move`
+                        // still enforces the cycle guard server-side.
+                        disabled: !canCreateProject,
+                        onDropMove: handleDropMove,
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
         )}
       </div>
+
+      {dndError ? (
+        <div className="fixed right-4 top-16 z-50" aria-live="polite">
+          <button
+            type="button"
+            onClick={() => setDndError(null)}
+            className="border-2 border-[#dc2626] bg-[#fef2f2] px-3 py-2 text-sm font-bold text-[#dc2626] shadow-[4px_4px_0px_0px_var(--shadow-color)]"
+          >
+            {dndError}
+          </button>
+        </div>
+      ) : null}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent>

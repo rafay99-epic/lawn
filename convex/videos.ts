@@ -312,6 +312,39 @@ export const update = mutation({
   },
 });
 
+export const move = mutation({
+  args: {
+    videoId: v.id("videos"),
+    projectId: v.id("projects"), // destination folder
+  },
+  handler: async (ctx, args) => {
+    // Validate access to the SOURCE: `requireVideoAccess` loads the video and its
+    // current (source) project, and requires `member` on the source folder's team.
+    const { project: sourceProject } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "member",
+    );
+
+    if (sourceProject._id === args.projectId) {
+      return; // no-op: dropped back into the same folder
+    }
+
+    // Validate the DESTINATION: caller must be a member of the destination
+    // folder's team, and that team must match the source video's team.
+    const { project: dest } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "member",
+    );
+    if (dest.teamId !== sourceProject.teamId) {
+      throw new Error("Can't move a video to a different team");
+    }
+
+    await ctx.db.patch(args.videoId, { projectId: args.projectId });
+  },
+});
+
 export const setVisibility = mutation({
   args: {
     videoId: v.id("videos"),

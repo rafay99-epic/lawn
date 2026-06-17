@@ -9,8 +9,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoreVertical, Trash2, ArrowRight, FolderInput } from "lucide-react";
 import { Id } from "@convex/_generated/dataModel";
+import { cn } from "@/lib/utils";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "../../../app/routes/dashboard/-project.data";
+import { useDraggableCard } from "@/lib/dnd/useDraggableCard";
+import { useFolderDropTarget } from "@/lib/dnd/useFolderDropTarget";
+import type { FolderNode } from "@/lib/folderTree";
+import type { DragPayload } from "@/lib/dnd/payload";
 
 export type ProjectCardProject = {
   _id: Id<"projects">;
@@ -34,6 +39,18 @@ type ProjectCardProps = {
   onOpen: () => void;
   onDelete?: (projectId: Id<"projects">) => void;
   onMove?: (project: { _id: Id<"projects">; name: string }) => void;
+  /** Drag-and-drop wiring. Omit to render a plain (non-draggable) card. */
+  dnd?: {
+    teamId: Id<"teams">;
+    /** This folder's own parent (undefined when it sits at the team root). */
+    currentParentId?: Id<"projects">;
+    /** The team's flat folder list, for the folder-into-descendant guard. */
+    folders?: readonly FolderNode[];
+    /** Disable both dragging and dropping (e.g. viewers). */
+    disabled?: boolean;
+    /** Perform the move when a legal drop lands on this folder card. */
+    onDropMove: (payload: DragPayload, destProjectId: Id<"projects">) => void;
+  };
 };
 
 export function ProjectCard({
@@ -42,6 +59,7 @@ export function ProjectCard({
   onOpen,
   onDelete,
   onMove,
+  dnd,
 }: ProjectCardProps) {
   const convex = useConvex();
   const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
@@ -53,9 +71,43 @@ export function ProjectCard({
 
   const showMenu = Boolean(onDelete || onMove);
 
+  const dndDisabled = !dnd || dnd.disabled;
+  const { ref: dragRef, isDragging } = useDraggableCard<HTMLDivElement>({
+    disabled: dndDisabled,
+    payload: {
+      kind: "folder",
+      projectId: project._id,
+      sourceParentId: dnd?.currentParentId,
+      teamId: dnd?.teamId as Id<"teams">,
+      name: project.name,
+    },
+  });
+  const {
+    ref: dropRef,
+    isDraggedOver,
+    canDropHere,
+  } = useFolderDropTarget<HTMLDivElement>({
+    disabled: dndDisabled,
+    targetProjectId: project._id,
+    teamId: dnd?.teamId as Id<"teams">,
+    folders: dnd?.folders,
+    onMove: (payload) => dnd?.onDropMove(payload, project._id),
+  });
+
+  const setCardRef = (node: HTMLDivElement | null) => {
+    dragRef.current = node;
+    dropRef.current = node;
+  };
+
   return (
     <Card
-      className="group cursor-pointer hover:bg-[#e8e8e0] transition-colors"
+      ref={setCardRef}
+      className={cn(
+        "group cursor-pointer hover:bg-[#e8e8e0] transition-colors",
+        isDragging && "opacity-50 border-dashed",
+        isDraggedOver && canDropHere && "border-[#2d5a2d] bg-[#2d5a2d]/10",
+        isDraggedOver && !canDropHere && "border-[#dc2626] [cursor:no-drop]",
+      )}
       onClick={onOpen}
       {...prewarmIntentHandlers}
     >

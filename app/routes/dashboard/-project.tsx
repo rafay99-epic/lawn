@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Eye,
   FolderPlus,
+  FolderInput,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -40,6 +41,10 @@ import { cn } from "@/lib/utils";
 import { projectPath, teamHomePath, videoPath } from "@/lib/routes";
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
+import { MoveVideoDialog } from "@/components/videos/MoveVideoDialog";
+import { useMoveActions } from "@/lib/dnd/useMoveActions";
+import { useDraggableCard } from "@/lib/dnd/useDraggableCard";
+import type { DragPayload } from "@/lib/dnd/payload";
 import { prefetchHlsRuntime, prefetchMuxPlaybackManifest } from "@/lib/muxPlayback";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
@@ -95,6 +100,8 @@ type VideoIntentTargetProps = {
   muxPlaybackId?: string;
   onOpen: () => void;
   children: ReactNode;
+  dragPayload: DragPayload;
+  dragDisabled?: boolean;
 };
 
 function VideoIntentTarget({
@@ -105,6 +112,8 @@ function VideoIntentTarget({
   muxPlaybackId,
   onOpen,
   children,
+  dragPayload,
+  dragDisabled,
 }: VideoIntentTargetProps) {
   const convex = useConvex();
   const prewarmIntentHandlers = useRoutePrewarmIntent(() => {
@@ -118,10 +127,15 @@ function VideoIntentTarget({
       prefetchMuxPlaybackManifest(muxPlaybackId);
     }
   });
+  const { ref: dragRef, isDragging } = useDraggableCard<HTMLDivElement>({
+    payload: dragPayload,
+    disabled: dragDisabled,
+  });
 
   return (
     <div
-      className={className}
+      ref={dragRef}
+      className={cn(className, isDragging && "opacity-50")}
       onClick={onOpen}
       {...prewarmIntentHandlers}
     >
@@ -162,6 +176,11 @@ export default function ProjectPage({
   const deleteFolder = useMutation(api.projects.remove);
 
   const teamId = context?.team?._id;
+  const { moveFromDrop } = useMoveActions();
+  const folders = useQuery(
+    api.projects.listForMove,
+    teamId ? { teamId } : "skip",
+  );
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
@@ -173,6 +192,28 @@ export default function ProjectPage({
     _id: Id<"projects">;
     name: string;
   } | null>(null);
+  const [moveVideoTarget, setMoveVideoTarget] = useState<{
+    _id: Id<"videos">;
+    title: string;
+    projectId: Id<"projects">;
+  } | null>(null);
+  const [dndError, setDndError] = useState<string | null>(null);
+
+  const handleDropMove = (
+    payload: DragPayload,
+    destProjectId?: Id<"projects">,
+  ) => {
+    void moveFromDrop(payload, destProjectId).then((result) => {
+      setDndError(result.error ?? null);
+    });
+  };
+
+  // Auto-dismiss the drop error, matching the share-toast behavior.
+  useEffect(() => {
+    if (!dndError) return;
+    const timeout = window.setTimeout(() => setDndError(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [dndError]);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -432,6 +473,17 @@ export default function ProjectPage({
                   }
                   onDelete={canUpload ? handleDeleteFolder : undefined}
                   onMove={canUpload ? (p) => setMoveTarget(p) : undefined}
+                  dnd={
+                    teamId
+                      ? {
+                          teamId,
+                          currentParentId: resolvedProjectId,
+                          folders,
+                          disabled: !canUpload,
+                          onDropMove: handleDropMove,
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -468,6 +520,14 @@ export default function ProjectPage({
                     projectId={project._id}
                     videoId={video._id}
                     muxPlaybackId={video.muxPlaybackId}
+                    dragDisabled={!canUpload || !teamId}
+                    dragPayload={{
+                      kind: "video",
+                      videoId: video._id,
+                      sourceProjectId: project._id,
+                      teamId: teamId as Id<"teams">,
+                      title: video.title,
+                    }}
                     onOpen={() =>
                       navigate({
                         to: videoPath(resolvedTeamSlug, project._id, video._id),
@@ -538,6 +598,21 @@ export default function ProjectPage({
                             <LinkIcon className="mr-2 h-4 w-4" />
                             Share
                           </DropdownMenuItem>
+                          {canUpload && (
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMoveVideoTarget({
+                                  _id: video._id,
+                                  title: video.title,
+                                  projectId: project._id,
+                                });
+                              }}
+                            >
+                              <FolderInput className="mr-2 h-4 w-4" />
+                              Move
+                            </DropdownMenuItem>
+                          )}
                           {canUpload && (
                             <DropdownMenuItem
                               className="text-[#dc2626] focus:text-[#dc2626]"
@@ -611,6 +686,14 @@ export default function ProjectPage({
                   projectId={project._id}
                   videoId={video._id}
                   muxPlaybackId={video.muxPlaybackId}
+                  dragDisabled={!canUpload || !teamId}
+                  dragPayload={{
+                    kind: "video",
+                    videoId: video._id,
+                    sourceProjectId: project._id,
+                    teamId: teamId as Id<"teams">,
+                    title: video.title,
+                  }}
                   onOpen={() =>
                     navigate({
                       to: videoPath(resolvedTeamSlug, project._id, video._id),
@@ -720,6 +803,21 @@ export default function ProjectPage({
                       </DropdownMenuItem>
                       {canUpload && (
                         <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMoveVideoTarget({
+                              _id: video._id,
+                              title: video.title,
+                              projectId: project._id,
+                            });
+                          }}
+                        >
+                          <FolderInput className="mr-2 h-4 w-4" />
+                          Move
+                        </DropdownMenuItem>
+                      )}
+                      {canUpload && (
+                        <DropdownMenuItem
                           className="text-[#dc2626] focus:text-[#dc2626]"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -752,6 +850,18 @@ export default function ProjectPage({
           >
             {shareToast.message}
           </div>
+        </div>
+      ) : null}
+
+      {dndError ? (
+        <div className="fixed right-4 top-16 z-50" aria-live="polite">
+          <button
+            type="button"
+            onClick={() => setDndError(null)}
+            className="border-2 border-[#dc2626] bg-[#fef2f2] px-3 py-2 text-sm font-bold text-[#dc2626] shadow-[4px_4px_0px_0px_var(--shadow-color)]"
+          >
+            {dndError}
+          </button>
         </div>
       ) : null}
 
@@ -799,6 +909,17 @@ export default function ProjectPage({
           open={moveTarget !== null}
           onOpenChange={(open) => {
             if (!open) setMoveTarget(null);
+          }}
+        />
+      )}
+
+      {teamId && (
+        <MoveVideoDialog
+          teamId={teamId}
+          video={moveVideoTarget}
+          open={moveVideoTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveVideoTarget(null);
           }}
         />
       )}
