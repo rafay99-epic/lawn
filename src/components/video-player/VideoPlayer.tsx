@@ -924,7 +924,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       ref={wrapperRef}
       className={cn(
         "relative",
-        controlsBelow ? "flex flex-col h-full bg-black" : "",
+        controlsBelow ? "flex flex-1 min-h-0 flex-col bg-black" : "",
         className,
       )}
     >
