@@ -1,8 +1,15 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query, MutationCtx } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  MutationCtx,
+  QueryCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
 import { assertTeamCanStoreBytes, assertTeamHasActiveSubscription } from "./billingHelpers";
@@ -17,11 +24,83 @@ const workflowStatusValidator = v.union(
 const visibilityValidator = v.union(v.literal("public"), v.literal("private"));
 
 const VIDEO_DELETE_BATCH_DOCS = 500;
+export const MAX_VIDEO_STACK_SIZE = 100;
+const VIDEO_STACK_LIMIT_ERROR = `A video can have at most ${MAX_VIDEO_STACK_SIZE} versions.`;
 
 type WorkflowStatus = "review" | "rework" | "done";
+type StackReadCtx = Pick<QueryCtx, "db">;
 
 function normalizeWorkflowStatus(status: WorkflowStatus | undefined): WorkflowStatus {
   return status ?? "review";
+}
+
+function normalizeVersionNumber(video: Doc<"videos">) {
+  return video.versionNumber ?? 1;
+}
+
+async function getStackVersions(ctx: StackReadCtx, video: Doc<"videos">) {
+  if (!video.versionStackId) {
+    return [video];
+  }
+
+  const versions = await ctx.db
+    .query("videos")
+    .withIndex("by_version_stack_id_and_version_number", (q) =>
+      q.eq("versionStackId", video.versionStackId),
+    )
+    .order("desc")
+    .take(MAX_VIDEO_STACK_SIZE + 1);
+
+  if (versions.length > MAX_VIDEO_STACK_SIZE) {
+    throw new Error(VIDEO_STACK_LIMIT_ERROR);
+  }
+
+  return versions;
+}
+
+async function getPredecessor(ctx: MutationCtx, videoId: Id<"videos">) {
+  return await ctx.db
+    .query("videos")
+    .withIndex("by_superseded_by_video_id", (q) => q.eq("supersededByVideoId", videoId))
+    .unique();
+}
+
+async function rewireStackBeforeDelete(ctx: MutationCtx, video: Doc<"videos">) {
+  if (!video.versionStackId) return;
+
+  const predecessor = await getPredecessor(ctx, video._id);
+  if (predecessor) {
+    await ctx.db.patch(predecessor._id, {
+      supersededByVideoId: video.supersededByVideoId,
+    });
+  }
+}
+
+async function failOrRollbackUpload(ctx: MutationCtx, video: Doc<"videos">, uploadError: string) {
+  if (
+    video.versionStackId &&
+    video.versionNumber !== undefined &&
+    video.status !== "processing" &&
+    video.status !== "ready" &&
+    !video.muxAssetId
+  ) {
+    await deleteVideoAndDependents(ctx, video._id);
+    return true;
+  }
+
+  await ctx.db.patch(video._id, {
+    muxAssetStatus: "errored",
+    uploadError,
+    status: "failed",
+    s3Key: undefined,
+    s3MultipartUploadId: undefined,
+    s3MultipartPartSizeBytes: undefined,
+    s3MultipartPartCount: undefined,
+    fileSize: undefined,
+    contentType: undefined,
+    uploadUpdatedAt: Date.now(),
+  });
+  return false;
 }
 
 async function generatePublicId(ctx: MutationCtx) {
@@ -62,6 +141,9 @@ export async function deleteVideoAndDependents(
   ctx: MutationCtx,
   videoId: Id<"videos">,
 ): Promise<number> {
+  const video = await ctx.db.get(videoId);
+  if (!video) return 0;
+
   let deleted = 0;
 
   const comments = await ctx.db
@@ -83,6 +165,7 @@ export async function deleteVideoAndDependents(
     deleted++;
   }
 
+  await rewireStackBeforeDelete(ctx, video);
   await ctx.db.delete(videoId);
   deleted++;
 
@@ -141,8 +224,88 @@ export async function deleteVideoAndDependentsBatch(
 
   if (remaining === 0) return { deleted, done: false };
 
+  await rewireStackBeforeDelete(ctx, video);
   await ctx.db.delete(videoId);
   return { deleted: deleted + 1, done: true };
+}
+
+async function insertVersionRecord(
+  ctx: MutationCtx,
+  args: {
+    latest: Doc<"videos">;
+    stackSize: number;
+    uploadedByClerkId: string;
+    uploaderName: string;
+    publicId: string;
+    fileSize?: number;
+    contentType?: string;
+  },
+) {
+  if (args.stackSize >= MAX_VIDEO_STACK_SIZE) {
+    throw new Error(VIDEO_STACK_LIMIT_ERROR);
+  }
+
+  const latest = args.latest;
+  const versionStackId = latest.versionStackId ?? latest._id;
+  const versionNumber = normalizeVersionNumber(latest) + 1;
+
+  const videoId = await ctx.db.insert("videos", {
+    projectId: latest.projectId,
+    uploadedByClerkId: args.uploadedByClerkId,
+    uploaderName: args.uploaderName,
+    title: latest.title,
+    description: latest.description,
+    visibility: latest.visibility,
+    publicId: args.publicId,
+    fileSize: args.fileSize,
+    contentType: args.contentType,
+    status: "uploading",
+    muxAssetStatus: "preparing",
+    workflowStatus: "review",
+    uploadUpdatedAt: Date.now(),
+    versionStackId,
+    versionNumber,
+  });
+
+  await ctx.db.patch(latest._id, {
+    versionStackId,
+    versionNumber: normalizeVersionNumber(latest),
+    supersededByVideoId: videoId,
+  });
+
+  return {
+    videoId,
+    versionStackId,
+    versionNumber,
+  };
+}
+
+export async function createVersionRecord(
+  ctx: MutationCtx,
+  args: {
+    sourceVideoId: Id<"videos">;
+    uploadedByClerkId: string;
+    uploaderName: string;
+    publicId: string;
+    fileSize?: number;
+    contentType?: string;
+  },
+) {
+  const sourceVideo = await ctx.db.get(args.sourceVideoId);
+  if (!sourceVideo) {
+    throw new Error("Video not found");
+  }
+
+  const versions = await getStackVersions(ctx, sourceVideo);
+  return await insertVersionRecord(ctx, {
+    latest: versions[0] ?? sourceVideo,
+    stackSize: versions.length,
+    uploadedByClerkId: args.uploadedByClerkId,
+    uploaderName: args.uploaderName,
+    publicId: args.publicId,
+    fileSize: args.fileSize,
+    contentType: args.contentType,
+  });
 }
 
 export const create = mutation({
@@ -179,6 +342,37 @@ export const create = mutation({
   },
 });
 
+export const createVersion = mutation({
+  args: {
+    sourceVideoId: v.id("videos"),
+    fileSize: v.optional(v.number()),
+    contentType: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, video: sourceVideo } = await requireVideoAccess(
+      ctx,
+      args.sourceVideoId,
+      "member",
+    );
+    const versions = await getStackVersions(ctx, sourceVideo);
+    const latest = versions[0] ?? sourceVideo;
+    const { project } = await requireProjectAccess(ctx, latest.projectId, "member");
+
+    assertVideoFileSizeAllowed(args.fileSize ?? 0);
+    await assertTeamCanStoreBytes(ctx, project.teamId, args.fileSize ?? 0);
+
+    return await insertVersionRecord(ctx, {
+      latest,
+      stackSize: versions.length,
+      uploadedByClerkId: user.subject,
+      uploaderName: identityName(user),
+      publicId: await generatePublicId(ctx),
+      fileSize: args.fileSize,
+      contentType: args.contentType,
+    });
+  },
+});
+
 export const list = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -186,7 +380,9 @@ export const list = query({
 
     const videos = await ctx.db
       .query("videos")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .withIndex("by_project_and_superseded_by_video_id", (q) =>
+        q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
+      )
       .order("desc")
       .collect();
 
@@ -201,6 +397,7 @@ export const list = query({
           ...video,
           uploaderName: video.uploaderName ?? "Unknown",
           workflowStatus: normalizeWorkflowStatus(video.workflowStatus),
+          versionNumber: normalizeVersionNumber(video),
           commentCount: comments.length,
         };
       }),
@@ -216,8 +413,30 @@ export const get = query({
       ...video,
       uploaderName: video.uploaderName ?? "Unknown",
       workflowStatus: normalizeWorkflowStatus(video.workflowStatus),
+      versionNumber: normalizeVersionNumber(video),
+      isLatestVersion: video.supersededByVideoId === undefined,
       role: membership.role,
     };
+  },
+});
+
+export const listVersions = query({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const { video } = await requireVideoAccess(ctx, args.videoId);
+
+    const versions = await getStackVersions(ctx, video);
+
+    return versions.map((version) => ({
+      _id: version._id,
+      projectId: version.projectId,
+      title: version.title,
+      status: version.status,
+      thumbnailUrl: version.thumbnailUrl,
+      versionNumber: normalizeVersionNumber(version),
+      isLatestVersion: version.supersededByVideoId === undefined,
+      createdAt: version._creationTime,
+    }));
   },
 });
 
@@ -373,7 +592,8 @@ export const move = mutation({
   handler: async (ctx, args) => {
     // Validate access to the SOURCE: `requireVideoAccess` loads the video and its
     // current (source) project, and requires `member` on the source folder's team.
-    const { project: sourceProject } = await requireVideoAccess(ctx, args.videoId, "member");
+    const { project: sourceProject, video } = await requireVideoAccess(ctx, args.videoId, "member");
+    const versions = await getStackVersions(ctx, video);
 
     if (sourceProject._id === args.projectId) {
       return; // no-op: dropped back into the same folder
@@ -386,7 +606,9 @@ export const move = mutation({
       throw new Error("Can't move a video to a different team");
     }
 
-    await ctx.db.patch(args.videoId, { projectId: args.projectId });
+    for (const version of versions) {
+      await ctx.db.patch(version._id, { projectId: args.projectId });
+    }
   },
 });
 
@@ -420,14 +642,21 @@ export const updateWorkflowStatus = mutation({
 
 export const remove = mutation({
   args: { videoId: v.id("videos") },
+  returns: v.object({
+    replacementVideoId: v.union(v.id("videos"), v.null()),
+  }),
   handler: async (ctx, args) => {
-    await requireVideoAccess(ctx, args.videoId, "admin");
+    const { video } = await requireVideoAccess(ctx, args.videoId, "admin");
+    await getStackVersions(ctx, video);
+    const predecessor = await getPredecessor(ctx, args.videoId);
+    const replacementVideoId = video.supersededByVideoId ?? predecessor?._id ?? null;
     const result = await deleteVideoAndDependentsBatch(ctx, args.videoId, VIDEO_DELETE_BATCH_DOCS);
     if (!result.done) {
       await ctx.scheduler.runAfter(0, internal.videos.continueVideoDelete, {
         videoId: args.videoId,
       });
     }
+    return { replacementVideoId };
   },
 });
 
@@ -635,6 +864,26 @@ export const markAsFailed = internalMutation({
   },
 });
 
+export const finalizeAbandonedUpload = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    uploadError: v.string(),
+  },
+  returns: v.object({
+    removedVersion: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) {
+      return { removedVersion: true };
+    }
+
+    return {
+      removedVersion: await failOrRollbackUpload(ctx, video, args.uploadError),
+    };
+  },
+});
+
 export const clearMultipartUploadId = internalMutation({
   args: {
     videoId: v.id("videos"),
@@ -677,7 +926,6 @@ export const listStaleUploadCandidates = internalQuery({
         .withIndex("by_status_and_upload_updated_at", (q) => q.eq("status", "uploading"))
         .take(args.limit)
     )
-      .filter((video) => video.s3Key && video.s3MultipartUploadId)
       .filter((video) => (video.uploadUpdatedAt ?? video._creationTime) < args.cutoff)
       .sort(
         (a, b) => (a.uploadUpdatedAt ?? a._creationTime) - (b.uploadUpdatedAt ?? b._creationTime),
@@ -698,23 +946,35 @@ export const claimStaleUpload = internalMutation({
     if (
       !video ||
       video.status !== "uploading" ||
-      (video.uploadUpdatedAt ?? video._creationTime) >= args.cutoff ||
-      !video.s3Key ||
-      !video.s3MultipartUploadId
+      (video.uploadUpdatedAt ?? video._creationTime) >= args.cutoff
     ) {
       return null;
     }
 
-    await ctx.db.patch(args.videoId, {
-      status: "failed",
-      muxAssetStatus: "errored",
-      uploadError: "Upload expired after a period of inactivity.",
-      uploadUpdatedAt: Date.now(),
-    });
+    const storage =
+      video.s3Key && video.s3MultipartUploadId
+        ? {
+            kind: "multipart" as const,
+            key: video.s3Key,
+            uploadId: video.s3MultipartUploadId,
+          }
+        : video.s3Key
+          ? {
+              kind: "object" as const,
+              key: video.s3Key,
+            }
+          : {
+              kind: "none" as const,
+            };
+    const removedVersion = await failOrRollbackUpload(
+      ctx,
+      video,
+      "Upload expired after a period of inactivity.",
+    );
 
     return {
-      key: video.s3Key,
-      uploadId: video.s3MultipartUploadId,
+      storage,
+      removedVersion,
     };
   },
 });

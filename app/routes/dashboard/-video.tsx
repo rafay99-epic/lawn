@@ -19,6 +19,8 @@ import { triggerTextDownload } from "@/lib/download";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { UploadButton } from "@/components/upload/UploadButton";
+import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import {
   Edit2,
   Check,
@@ -27,19 +29,149 @@ import {
   MessageSquare,
   MoreVertical,
   Download,
+  Layers3,
+  Upload,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Id } from "@convex/_generated/dataModel";
-import { projectPath, teamHomePath } from "@/lib/routes";
+import { projectPath, teamHomePath, videoPath } from "@/lib/routes";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { prewarmTeam } from "./-team.data";
-import { useVideoData } from "./-video.data";
+import { prewarmVideo, useVideoData } from "./-video.data";
+
+function versionStatusLabel(status: string) {
+  switch (status) {
+    case "uploading":
+      return "Uploading";
+    case "processing":
+      return "Processing";
+    case "failed":
+      return "Failed";
+    default:
+      return "Ready";
+  }
+}
+
+function VersionSelectorOption({
+  version,
+  teamSlug,
+  currentVideoId,
+  onSelect,
+}: {
+  version: {
+    _id: Id<"videos">;
+    projectId: Id<"projects">;
+    versionNumber: number;
+    status: string;
+    isLatestVersion: boolean;
+  };
+  teamSlug: string;
+  currentVideoId: Id<"videos">;
+  onSelect: (videoId: Id<"videos">) => void;
+}) {
+  const convex = useConvex();
+  const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
+    prewarmVideo(convex, {
+      teamSlug,
+      projectId: version.projectId,
+      videoId: version._id,
+    }),
+  );
+
+  return (
+    <DropdownMenuRadioItem
+      value={version._id}
+      onSelect={() => onSelect(version._id)}
+      {...prewarmIntentHandlers}
+    >
+      <span className="font-bold">v{version.versionNumber}</span>
+      <span className="ml-2 text-xs text-[#888]">
+        {version._id === currentVideoId
+          ? `${version.isLatestVersion ? "Viewing latest" : "Viewing"} · ${versionStatusLabel(version.status)}`
+          : version.isLatestVersion
+            ? `Latest · ${versionStatusLabel(version.status)}`
+            : versionStatusLabel(version.status)}
+      </span>
+    </DropdownMenuRadioItem>
+  );
+}
+
+function VersionSelector({
+  versions,
+  currentVideoId,
+  currentVersionNumber,
+  teamSlug,
+  onSelect,
+  compact = false,
+}: {
+  versions:
+    | Array<{
+        _id: Id<"videos">;
+        projectId: Id<"projects">;
+        versionNumber: number;
+        status: string;
+        isLatestVersion: boolean;
+      }>
+    | undefined;
+  currentVideoId: Id<"videos">;
+  currentVersionNumber: number;
+  teamSlug: string;
+  onSelect: (videoId: Id<"videos">) => void;
+  compact?: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size={compact ? "icon" : "default"}
+          className={compact ? "h-8 w-8" : undefined}
+          aria-label={`Select video version, currently v${currentVersionNumber}`}
+        >
+          {versions === undefined ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Layers3 className="h-4 w-4" aria-hidden="true" />
+          )}
+          {!compact && <span>v{currentVersionNumber}</span>}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuLabel>Video versions</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {versions === undefined ? (
+          <DropdownMenuItem disabled>Loading versions…</DropdownMenuItem>
+        ) : versions.length === 0 ? (
+          <DropdownMenuItem disabled>No versions available</DropdownMenuItem>
+        ) : (
+          <DropdownMenuRadioGroup value={currentVideoId}>
+            {versions.map((version) => (
+              <VersionSelectorOption
+                key={version._id}
+                version={version}
+                teamSlug={teamSlug}
+                currentVideoId={currentVideoId}
+                onSelect={onSelect}
+              />
+            ))}
+          </DropdownMenuRadioGroup>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export default function VideoPage() {
   const params = useParams({ strict: false });
@@ -56,6 +188,7 @@ export default function VideoPage() {
     resolvedProjectId,
     resolvedVideoId,
     video,
+    versions,
     comments,
     commentsThreaded,
   } = useVideoData({
@@ -65,10 +198,12 @@ export default function VideoPage() {
   });
   const updateVideo = useMutation(api.videos.update);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
+  const deleteVideo = useMutation(api.videos.remove);
   const checkMuxAssetStatus = useAction(api.videoActions.checkMuxAssetStatus);
   const getPlaybackSession = useAction(api.videoActions.getPlaybackSession);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const { requestVersionUpload } = useDashboardUploadContext();
 
   const [currentTime, setCurrentTime] = useState(0);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -263,6 +398,58 @@ export default function VideoPage() {
     [resolvedVideoId, updateVideoWorkflowStatus],
   );
 
+  const handleVersionSelected = useCallback(
+    (selectedVideoId: Id<"videos">) => {
+      if (!resolvedProjectId || selectedVideoId === resolvedVideoId) return;
+      navigate({
+        to: videoPath(resolvedTeamSlug, resolvedProjectId, selectedVideoId),
+      });
+    },
+    [navigate, resolvedProjectId, resolvedTeamSlug, resolvedVideoId],
+  );
+
+  const handleNewVersionSelected = useCallback(
+    (files: File[]) => {
+      const file = files[0];
+      if (!file || !resolvedVideoId || !resolvedProjectId) return;
+      requestVersionUpload(
+        resolvedVideoId,
+        video?.versionStackId ?? resolvedVideoId,
+        resolvedProjectId,
+        file,
+      );
+    },
+    [requestVersionUpload, resolvedProjectId, resolvedVideoId, video?.versionStackId],
+  );
+
+  const handleDeleteVersion = useCallback(async () => {
+    if (!video || !resolvedVideoId || !resolvedProjectId) return;
+    if (
+      !window.confirm(
+        `Delete ${video.isLatestVersion ? "the latest" : "the current"} version (v${video.versionNumber})? Its comments and share links will be deleted.${video.isLatestVersion ? " The previous version will become latest." : ""}`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const result = await deleteVideo({ videoId: resolvedVideoId });
+      if (result.replacementVideoId) {
+        navigate({
+          to: videoPath(resolvedTeamSlug, resolvedProjectId, result.replacementVideoId),
+          replace: true,
+        });
+      } else {
+        navigate({
+          to: projectPath(resolvedTeamSlug, resolvedProjectId),
+          replace: true,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to delete video version:", error);
+    }
+  }, [deleteVideo, navigate, resolvedProjectId, resolvedTeamSlug, resolvedVideoId, video]);
+
   const startEditingTitle = () => {
     if (video) {
       setEditedTitle(video.title);
@@ -287,6 +474,7 @@ export default function VideoPage() {
   }
 
   const canEdit = video.role !== "viewer";
+  const canDelete = video.role === "owner" || video.role === "admin";
   const canComment = true;
 
   return (
@@ -355,7 +543,7 @@ export default function VideoPage() {
         ]}
       >
         {/* Desktop: inline actions */}
-        <div className="hidden items-center gap-3 text-xs text-[#888] sm:flex">
+        <div className="hidden items-center gap-3 text-xs text-[#888] 2xl:flex">
           <span className="max-w-[100px] truncate">{video.uploaderName}</span>
           {video.duration && (
             <>
@@ -365,33 +553,24 @@ export default function VideoPage() {
           )}
           <VideoWatchers watchers={watchers} />
         </div>
-        <div className="ml-1 hidden flex-shrink-0 items-center gap-3 border-l-2 border-[#1a1a1a]/20 pl-3 sm:flex">
-          <VideoWorkflowStatusControl
-            status={video.workflowStatus}
-            size="lg"
-            disabled={!canEdit}
-            onChange={(workflowStatus) => {
-              void handleUpdateWorkflowStatus(workflowStatus);
-            }}
+        <div className="ml-1 hidden flex-shrink-0 items-center gap-3 border-l-2 border-[#1a1a1a]/20 pl-3 lg:flex">
+          <VersionSelector
+            versions={versions}
+            currentVideoId={resolvedVideoId}
+            currentVersionNumber={video.versionNumber}
+            teamSlug={resolvedTeamSlug}
+            onSelect={handleVersionSelected}
           />
-          <Button variant="outline" onClick={() => setShareDialogOpen(true)}>
-            <LinkIcon className="mr-1.5 h-4 w-4" />
-            Share
-          </Button>
-          <Button
-            variant="outline"
-            className="lg:hidden"
-            onClick={() => setMobileCommentsOpen(true)}
-          >
-            <MessageSquare className="h-4 w-4" />
-            {comments && comments.length > 0 && (
-              <span className="ml-1 text-xs">{comments.length}</span>
-            )}
-          </Button>
-        </div>
-
-        {/* Mobile: workflow status + menu button */}
-        <div className="flex items-center gap-2 sm:hidden">
+          {canEdit && (
+            <UploadButton
+              multiple={false}
+              variant="outline"
+              onFilesSelected={handleNewVersionSelected}
+            >
+              <Upload className="h-4 w-4" />
+              New version
+            </UploadButton>
+          )}
           <VideoWorkflowStatusControl
             status={video.workflowStatus}
             size="lg"
@@ -402,8 +581,71 @@ export default function VideoPage() {
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="h-8 w-8">
-                <MoreVertical className="h-4 w-4" />
+              <Button variant="outline" size="icon" aria-label="More video actions">
+                <MoreVertical className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setShareDialogOpen(true)}>
+                <LinkIcon className="mr-2 h-4 w-4" />
+                Share
+              </DropdownMenuItem>
+              <DropdownMenuItem className="xl:hidden" onSelect={() => setMobileCommentsOpen(true)}>
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Comments{comments && comments.length > 0 ? ` (${comments.length})` : ""}
+              </DropdownMenuItem>
+              {canDelete && (
+                <DropdownMenuItem
+                  className="text-[#dc2626] focus:text-[#dc2626]"
+                  onSelect={() => void handleDeleteVersion()}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {`Delete ${video.isLatestVersion ? "latest" : "current"} version (v${video.versionNumber})`}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Compact: workflow status + consolidated menu until large screens */}
+        <div className="flex items-center gap-2 lg:hidden">
+          <VersionSelector
+            versions={versions}
+            currentVideoId={resolvedVideoId}
+            currentVersionNumber={video.versionNumber}
+            teamSlug={resolvedTeamSlug}
+            onSelect={handleVersionSelected}
+            compact
+          />
+          <VideoWorkflowStatusControl
+            status={video.workflowStatus}
+            size="lg"
+            disabled={!canEdit}
+            onChange={(workflowStatus) => {
+              void handleUpdateWorkflowStatus(workflowStatus);
+            }}
+          />
+          {canEdit && (
+            <UploadButton
+              multiple={false}
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onFilesSelected={handleNewVersionSelected}
+            >
+              <Upload className="h-4 w-4" />
+              <span className="sr-only">Upload new version</span>
+            </UploadButton>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="More video actions"
+              >
+                <MoreVertical className="h-4 w-4" aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -415,6 +657,15 @@ export default function VideoPage() {
                 <MessageSquare className="mr-2 h-4 w-4" />
                 Comments{comments && comments.length > 0 ? ` (${comments.length})` : ""}
               </DropdownMenuItem>
+              {canDelete && (
+                <DropdownMenuItem
+                  className="text-[#dc2626] focus:text-[#dc2626]"
+                  onSelect={() => void handleDeleteVersion()}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {`Delete ${video.isLatestVersion ? "latest" : "current"} version (v${video.versionNumber})`}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
