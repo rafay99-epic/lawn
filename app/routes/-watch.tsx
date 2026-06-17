@@ -139,6 +139,25 @@ export default function WatchPage() {
     );
   }
 
+  if (videoData?.processing) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border-2 border-[#1a1a1a]">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#1a1a1a]/20 border-t-[#1a1a1a]" />
+            </div>
+            <CardTitle>Processing video</CardTitle>
+            <CardDescription>
+              {videoData.title ? `“${videoData.title}” is` : "This video is"} still processing and
+              will be ready to watch shortly. This page updates automatically.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
   if (!videoData?.video) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">

@@ -64,7 +64,7 @@ test("serves the latest ready version when the shared head is still processing",
   // version's public links should resolve to the ready v1 instead of failing.
   for (const publicId of ["watch-v1", "watch-v2"]) {
     const result = await t.query(api.videos.getByPublicId, { publicId });
-    expect(result?.video._id).toBe(v1);
+    expect(result?.video?._id).toBe(v1);
   }
 
   // Sanity: v2 really is the not-ready head.
@@ -84,7 +84,7 @@ test("serves the newest version once it becomes ready", async () => {
 
   for (const publicId of ["watch-v1", "watch-v2"]) {
     const result = await t.query(api.videos.getByPublicId, { publicId });
-    expect(result?.video._id).toBe(v2);
+    expect(result?.video?._id).toBe(v2);
   }
 });
 
@@ -125,6 +125,60 @@ test("setVisibility toggles every version in the stack and gates the public URL"
   }));
   expect(afterPublic.v1?.visibility).toBe("public");
   expect(afterPublic.v2?.visibility).toBe("public");
+});
+
+test("reports processing when a public video has no ready version yet", async () => {
+  const t = convexTest(schema, modules);
+  await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "user_1",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", { teamId, name: "Campaign" });
+    await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "user_1",
+      uploaderName: "Owner",
+      title: "Fresh upload",
+      visibility: "public",
+      publicId: "processing-v1",
+      status: "processing",
+      workflowStatus: "review",
+    });
+  });
+
+  const result = await t.query(api.videos.getByPublicId, { publicId: "processing-v1" });
+  expect(result?.processing).toBe(true);
+  expect(result?.video).toBeNull();
+  expect(result?.title).toBe("Fresh upload");
+});
+
+test("is unavailable when the only public version failed", async () => {
+  const t = convexTest(schema, modules);
+  await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "user_1",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", { teamId, name: "Campaign" });
+    await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "user_1",
+      uploaderName: "Owner",
+      title: "Broken upload",
+      visibility: "public",
+      publicId: "failed-v1",
+      status: "failed",
+      workflowStatus: "review",
+    });
+  });
+
+  const result = await t.query(api.videos.getByPublicId, { publicId: "failed-v1" });
+  expect(result).toBeNull();
 });
 
 test("returns null for an unknown public id", async () => {

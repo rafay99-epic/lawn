@@ -589,28 +589,34 @@ export const listVersions = query({
   },
 });
 
+type PublicWatchResolution =
+  | { state: "ready"; video: Doc<"videos"> }
+  | { state: "processing"; title: string }
+  | { state: "unavailable" };
+
 /**
- * Resolves the video that should be served for a public `/watch/<publicId>` link.
+ * Resolves what a public `/watch/<publicId>` link should show.
  *
  * Each version in a stack is its own `videos` row with its own `publicId`, so the
  * shared link can point at a version that is not the one that should currently
  * play publicly — e.g. a freshly uploaded version that is still processing, or an
  * older superseded cut. Marking the linked version private still disables the URL,
  * but otherwise we serve the latest version of the stack that is both public and
- * ready. This keeps a public video watchable while newer versions process and
- * always surfaces the current cut, instead of returning "video unavailable".
+ * ready. If nothing is ready yet but a public version is still uploading or
+ * transcoding, we report `processing` so the viewer sees "ready soon" instead of
+ * "video unavailable".
  */
-export async function resolvePublicVideo(
+async function resolvePublicWatch(
   ctx: StackReadCtx,
   publicId: string,
-): Promise<Doc<"videos"> | null> {
+): Promise<PublicWatchResolution> {
   const matched = await ctx.db
     .query("videos")
     .withIndex("by_public_id", (q) => q.eq("publicId", publicId))
     .unique();
 
   if (!matched || matched.visibility !== "public") {
-    return null;
+    return { state: "unavailable" };
   }
 
   // Fall back to the matched row alone if the stack is somehow malformed, so a
@@ -623,25 +629,58 @@ export async function resolvePublicVideo(
     stackVersions = [matched];
   }
 
+  // Prefer the latest version that is both public and ready.
   for (let index = stackVersions.length - 1; index >= 0; index--) {
     const candidate = stackVersions[index];
     if (candidate.visibility === "public" && candidate.status === "ready") {
-      return candidate;
+      return { state: "ready", video: candidate };
     }
   }
 
-  return null;
+  // Nothing is playable yet — if a public version is still in flight, tell the
+  // viewer it's on the way rather than treating it as missing.
+  const hasInflightVersion = stackVersions.some(
+    (candidate) =>
+      candidate.visibility === "public" &&
+      (candidate.status === "uploading" || candidate.status === "processing"),
+  );
+  if (hasInflightVersion) {
+    return { state: "processing", title: matched.title };
+  }
+
+  return { state: "unavailable" };
+}
+
+/**
+ * Resolves the ready video to serve for a public `/watch/<publicId>` link, or
+ * null if nothing is currently playable. Used by the comment and download paths,
+ * which only ever operate on a ready cut.
+ */
+export async function resolvePublicVideo(
+  ctx: StackReadCtx,
+  publicId: string,
+): Promise<Doc<"videos"> | null> {
+  const resolution = await resolvePublicWatch(ctx, publicId);
+  return resolution.state === "ready" ? resolution.video : null;
 }
 
 export const getByPublicId = query({
   args: { publicId: v.string() },
   handler: async (ctx, args) => {
-    const video = await resolvePublicVideo(ctx, args.publicId);
-    if (!video) {
+    const resolution = await resolvePublicWatch(ctx, args.publicId);
+
+    if (resolution.state === "unavailable") {
       return null;
     }
 
+    if (resolution.state === "processing") {
+      return { processing: true as const, title: resolution.title, video: null };
+    }
+
+    const video = resolution.video;
     return {
+      processing: false as const,
+      title: video.title,
       video: {
         _id: video._id,
         title: video.title,
