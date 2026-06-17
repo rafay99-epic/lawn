@@ -7,15 +7,12 @@ export const MULTIPART_PART_SIZE_BYTES = 64 * MEBIBYTE;
 export const MULTIPART_UPLOAD_CONCURRENCY = 4;
 export const MAX_SIGN_PARTS_BATCH = 20;
 
-export function formatMaxUploadSize(maxFileSizeBytes = MAX_VIDEO_FILE_SIZE_BYTES) {
-  return maxFileSizeBytes === SINGLE_PUT_MAX_BYTES ? "5 GiB" : "30 GiB";
+export function formatMaxUploadSize() {
+  return "30 GiB";
 }
 
-export function isFileTooLarge(
-  fileSize: number,
-  maxFileSizeBytes = MAX_VIDEO_FILE_SIZE_BYTES,
-) {
-  return fileSize > maxFileSizeBytes;
+export function isFileTooLarge(fileSize: number) {
+  return fileSize > MAX_VIDEO_FILE_SIZE_BYTES;
 }
 
 function bytesToHex(bytes: Uint8Array) {

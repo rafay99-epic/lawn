@@ -2,7 +2,6 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getUser, requireTeamAccess, requireProjectAccess } from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
-import { getTeamMaxVideoFileSizeBytes } from "./uploadLimits";
 
 export const create = mutation({
   args: {
@@ -103,22 +102,6 @@ export const get = query({
   handler: async (ctx, args) => {
     const { project, membership } = await requireProjectAccess(ctx, args.projectId);
     return { ...project, role: membership.role };
-  },
-});
-
-export const getUploadCapabilities = query({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, args) => {
-    const { project } = await requireProjectAccess(ctx, args.projectId, "member");
-    const team = await ctx.db.get(project.teamId);
-    if (!team) {
-      throw new Error("Team not found");
-    }
-
-    return {
-      largeUploadsEnabled: team.largeUploadsEnabled === true,
-      maxFileSizeBytes: getTeamMaxVideoFileSizeBytes(team.largeUploadsEnabled),
-    };
   },
 });
 

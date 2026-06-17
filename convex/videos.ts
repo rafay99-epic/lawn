@@ -8,7 +8,7 @@ import {
   assertTeamCanStoreBytes,
   assertTeamHasActiveSubscription,
 } from "./billingHelpers";
-import { assertVideoFileSizeAllowedForTeam } from "./uploadLimits";
+import { assertVideoFileSizeAllowed } from "./uploadLimits";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -63,14 +63,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { user, project } = await requireProjectAccess(ctx, args.projectId, "member");
-    const team = await ctx.db.get(project.teamId);
-    if (!team) {
-      throw new Error("Team not found");
-    }
-    assertVideoFileSizeAllowedForTeam(
-      args.fileSize ?? 0,
-      team.largeUploadsEnabled,
-    );
+    assertVideoFileSizeAllowed(args.fileSize ?? 0);
     await assertTeamCanStoreBytes(ctx, project.teamId, args.fileSize ?? 0);
     const publicId = await generatePublicId(ctx);
 
@@ -380,11 +373,7 @@ export const assertVideoUploadAllowed = internalQuery({
     if (!project) {
       throw new Error("Project not found");
     }
-    const team = await ctx.db.get(project.teamId);
-    if (!team) {
-      throw new Error("Team not found");
-    }
-    assertVideoFileSizeAllowedForTeam(args.fileSize, team.largeUploadsEnabled);
+    assertVideoFileSizeAllowed(args.fileSize);
 
     const currentBytes =
       video.status !== "failed" &&

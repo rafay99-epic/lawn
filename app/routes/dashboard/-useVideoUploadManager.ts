@@ -1,4 +1,4 @@
-import { useAction, useConvex, useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { useCallback, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -38,7 +38,6 @@ function createUploadId() {
 }
 
 export function useVideoUploadManager() {
-  const convex = useConvex();
   const createVideo = useMutation(api.videos.create);
   const initiateVideoUpload = useAction(api.videoActions.initiateVideoUpload);
   const signUploadParts = useAction(api.videoActions.signUploadParts);
@@ -57,17 +56,12 @@ export function useVideoUploadManager() {
 
   const uploadFilesToProject = useCallback(
     async (projectId: Id<"projects">, files: File[]) => {
-      const capabilities = await convex.query(
-        api.projects.getUploadCapabilities,
-        { projectId },
-      );
-
       for (const file of files) {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
 
-        if (isFileTooLarge(file.size, capabilities.maxFileSizeBytes)) {
+        if (isFileTooLarge(file.size)) {
           setUploads((prev) => [
             ...prev,
             {
@@ -76,7 +70,7 @@ export function useVideoUploadManager() {
               file,
               progress: 0,
               status: "error",
-              error: `Video file is too large. Maximum size is ${formatMaxUploadSize(capabilities.maxFileSizeBytes)}.`,
+              error: `Video file is too large. Maximum size is ${formatMaxUploadSize()}.`,
               abortController,
             },
           ]);
@@ -139,7 +133,6 @@ export function useVideoUploadManager() {
               signal: abortController.signal,
               resumeSession,
               fileFingerprint: fingerprint,
-              maxFileSizeBytes: capabilities.maxFileSizeBytes,
               onResumingChange: (resuming) => {
                 setUploads((prev) =>
                   prev.map((upload) =>
@@ -228,7 +221,6 @@ export function useVideoUploadManager() {
     },
     [
       createVideo,
-      convex,
       initiateVideoUpload,
       signUploadParts,
       completeMultipartUpload,

@@ -16,7 +16,6 @@ export default defineSchema({
     stripeSubscriptionId: v.optional(v.string()),
     stripePriceId: v.optional(v.string()),
     billingStatus: v.optional(v.string()),
-    largeUploadsEnabled: v.optional(v.boolean()),
   })
     .index("by_slug", ["slug"])
     .index("by_owner", ["ownerClerkId"])

@@ -3,7 +3,6 @@ export const MEBIBYTE = 1024 ** 2;
 
 export const MAX_VIDEO_FILE_SIZE_BYTES = 30 * GIBIBYTE;
 export const SINGLE_PUT_MAX_BYTES = 5 * GIBIBYTE;
-export const DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES = SINGLE_PUT_MAX_BYTES;
 export const MULTIPART_PART_SIZE_BYTES = 64 * MEBIBYTE;
 
 export const PRESIGN_SINGLE_PUT_EXPIRES_SEC = 3600;
@@ -25,20 +24,8 @@ export function usesMultipartUpload(fileSize: number) {
   return fileSize > SINGLE_PUT_MAX_BYTES;
 }
 
-export function getTeamMaxVideoFileSizeBytes(largeUploadsEnabled: boolean | undefined) {
-  return largeUploadsEnabled
-    ? MAX_VIDEO_FILE_SIZE_BYTES
-    : DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES;
-}
-
-export function assertVideoFileSizeAllowedForTeam(
-  fileSize: number,
-  largeUploadsEnabled: boolean | undefined,
-) {
-  const maxFileSizeBytes = getTeamMaxVideoFileSizeBytes(largeUploadsEnabled);
-  if (fileSize > maxFileSizeBytes) {
-    const maxSizeLabel = largeUploadsEnabled ? "30 GiB" : "5 GiB";
-    throw new Error(`Video file is too large. Maximum size is ${maxSizeLabel}.`);
+export function assertVideoFileSizeAllowed(fileSize: number) {
+  if (fileSize > MAX_VIDEO_FILE_SIZE_BYTES) {
+    throw new Error("Video file is too large. Maximum size is 30 GiB.");
   }
-  return maxFileSizeBytes;
 }
