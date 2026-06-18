@@ -14,15 +14,22 @@
 # back to Vite :5296 and Convex's default ports.
 #
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 # Ensure this worktree's local deployment exists and is seeded (idempotent).
-bash scripts/convex-local-setup.sh
+if ! bash scripts/convex-local-setup.sh; then
+  echo "[dev] local Convex provisioning failed." >&2
+  exit 1
+fi
 
 web_port="${CONDUCTOR_PORT:-5296}"
-convex_flags="--tail-logs disable"
+convex_flags=(--tail-logs disable)
 if [ -n "${CONDUCTOR_PORT:-}" ]; then
-  convex_flags="--local-cloud-port $((CONDUCTOR_PORT + 1)) --local-site-port $((CONDUCTOR_PORT + 2)) $convex_flags"
+  convex_flags=(
+    --local-cloud-port "$((CONDUCTOR_PORT + 1))"
+    --local-site-port "$((CONDUCTOR_PORT + 2))"
+    "${convex_flags[@]}"
+  )
 fi
 
 convex_log="$(mktemp)"
@@ -44,12 +51,17 @@ trap cleanup EXIT
 echo "[dev] starting local Convex backend (writes the local URL into .env.local)..."
 # CONVEX_DEPLOYMENT= keeps convex on the LOCAL deployment even if .env.local was
 # copied in pointing at a cloud "dev:" deployment.
-CONVEX_AGENT_MODE=anonymous CONVEX_DEPLOYMENT= bunx convex dev $convex_flags > "$convex_log" 2>&1 &
+CONVEX_AGENT_MODE=anonymous CONVEX_DEPLOYMENT='' \
+  bunx convex dev "${convex_flags[@]}" > "$convex_log" 2>&1 &
 convex_pid=$!
 
 # Wait until functions are pushed (so .env.local is final) before starting Vite.
+convex_ready=0
 for _ in $(seq 1 120); do
-  grep -q "Convex functions ready" "$convex_log" 2>/dev/null && break
+  if grep -q "Convex functions ready" "$convex_log" 2>/dev/null; then
+    convex_ready=1
+    break
+  fi
   if ! kill -0 "$convex_pid" 2>/dev/null; then
     echo "[dev] Convex exited before becoming ready:" >&2
     sed 's/^/[convex] /' "$convex_log" >&2
@@ -57,6 +69,12 @@ for _ in $(seq 1 120); do
   fi
   sleep 1
 done
+
+if [ "$convex_ready" -ne 1 ]; then
+  echo "[dev] Convex did not become ready within 120 seconds:" >&2
+  sed 's/^/[convex] /' "$convex_log" >&2
+  exit 1
+fi
 
 # From here, stream Convex output to this terminal alongside Vite.
 sed 's/^/[convex] /' "$convex_log"            # replay startup output
