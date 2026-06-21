@@ -26,6 +26,8 @@ type DashboardProjectCardProps = {
     name: string;
     videoCount: number;
     subfolderCount: number;
+    videoCountIsCapped: boolean;
+    subfolderCountIsCapped: boolean;
   };
   onOpen: () => void;
 };
@@ -66,7 +68,12 @@ function DashboardProjectCard({ teamSlug, project, onOpen }: DashboardProjectCar
         <div className="min-w-0 flex-1">
           <CardTitle className="truncate text-base">{project.name}</CardTitle>
           <CardDescription className="mt-1">
-            {formatProjectMeta(project.videoCount, project.subfolderCount)}
+            {formatProjectMeta(
+              project.videoCount,
+              project.subfolderCount,
+              project.videoCountIsCapped,
+              project.subfolderCountIsCapped,
+            )}
           </CardDescription>
         </div>
       </CardHeader>

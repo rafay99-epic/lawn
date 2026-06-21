@@ -147,6 +147,8 @@ export const listWithProjects = query({
               ...project,
               videoCount: videoPage.length === 101 ? 100 : videoPage.length,
               subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
+              videoCountIsCapped: videoPage.length === 101,
+              subfolderCountIsCapped: subfolderPage.length === 101,
             };
           }),
         );

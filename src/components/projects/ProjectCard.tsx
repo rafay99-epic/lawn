@@ -22,14 +22,23 @@ export type ProjectCardProject = {
   name: string;
   videoCount: number;
   subfolderCount: number;
+  videoCountIsCapped: boolean;
+  subfolderCountIsCapped: boolean;
 };
 
-export function formatProjectMeta(videoCount: number, subfolderCount: number) {
+export function formatProjectMeta(
+  videoCount: number,
+  subfolderCount: number,
+  videoCountIsCapped = false,
+  subfolderCountIsCapped = false,
+) {
   const parts: string[] = [];
   if (subfolderCount > 0) {
-    parts.push(`${subfolderCount} folder${subfolderCount !== 1 ? "s" : ""}`);
+    parts.push(
+      `${subfolderCount}${subfolderCountIsCapped ? "+" : ""} folder${subfolderCount !== 1 ? "s" : ""}`,
+    );
   }
-  parts.push(`${videoCount} video${videoCount !== 1 ? "s" : ""}`);
+  parts.push(`${videoCount}${videoCountIsCapped ? "+" : ""} video${videoCount !== 1 ? "s" : ""}`);
   return parts.join(" · ");
 }
 
@@ -115,7 +124,12 @@ export function ProjectCard({
         <div className="min-w-0 flex-1">
           <CardTitle className="truncate text-base">{project.name}</CardTitle>
           <CardDescription className="mt-1">
-            {formatProjectMeta(project.videoCount, project.subfolderCount)}
+            {formatProjectMeta(
+              project.videoCount,
+              project.subfolderCount,
+              project.videoCountIsCapped,
+              project.subfolderCountIsCapped,
+            )}
           </CardDescription>
         </div>
         {showMenu && (

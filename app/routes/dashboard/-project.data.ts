@@ -1,7 +1,9 @@
-import { useQuery, type ConvexReactClient } from "convex/react";
+import { usePaginatedQuery, useQuery, type ConvexReactClient } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { makeRouteQuerySpec, prewarmSpecs } from "@/lib/convexRouteData";
+
+const VIDEO_PAGE_SIZE = 40;
 
 export function getProjectEssentialSpecs(params: { teamSlug: string; projectId: Id<"projects"> }) {
   return [
@@ -20,6 +22,7 @@ export function getProjectEssentialSpecs(params: { teamSlug: string; projectId: 
     }),
     makeRouteQuerySpec(api.videos.list, {
       projectId: params.projectId,
+      paginationOpts: { cursor: null, numItems: VIDEO_PAGE_SIZE },
     }),
   ];
 }
@@ -35,10 +38,31 @@ export function useProjectData(params: { teamSlug: string; projectId: Id<"projec
     api.projects.get,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
   );
-  const videos = useQuery(
+  const {
+    results: paginatedVideos,
+    status: videosStatus,
+    loadMore,
+  } = usePaginatedQuery(
     api.videos.list,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
+    { initialNumItems: VIDEO_PAGE_SIZE },
   );
+  // usePaginatedQuery deliberately cache-busts its first request. Read the
+  // id-less first page while that request starts so hover prewarming can still
+  // paint the project immediately, then hand off to the live paginated result.
+  const prewarmedVideoPage = useQuery(
+    api.videos.list,
+    resolvedProjectId && videosStatus === "LoadingFirstPage"
+      ? {
+          projectId: resolvedProjectId,
+          paginationOpts: { cursor: null, numItems: VIDEO_PAGE_SIZE },
+        }
+      : "skip",
+  );
+  const videos =
+    videosStatus === "LoadingFirstPage" && prewarmedVideoPage
+      ? prewarmedVideoPage.page
+      : paginatedVideos;
   const childFolders = useQuery(
     api.projects.listChildren,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
@@ -54,6 +78,8 @@ export function useProjectData(params: { teamSlug: string; projectId: Id<"projec
     resolvedTeamSlug,
     project,
     videos,
+    videosStatus,
+    loadMoreVideos: () => loadMore(VIDEO_PAGE_SIZE),
     childFolders,
     breadcrumb,
   };

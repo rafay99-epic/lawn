@@ -171,6 +171,8 @@ export default function ProjectPage({
     resolvedTeamSlug,
     project,
     videos,
+    videosStatus,
+    loadMoreVideos,
     childFolders,
     breadcrumb,
   } = useProjectData({ teamSlug, projectId });
@@ -243,7 +245,7 @@ export default function ProjectPage({
   const isLoadingData =
     context === undefined ||
     project === undefined ||
-    videos === undefined ||
+    (videosStatus === "LoadingFirstPage" && videos.length === 0) ||
     childFolders === undefined ||
     breadcrumb === undefined ||
     shouldCanonicalize;
@@ -689,6 +691,7 @@ export default function ProjectPage({
                           <span className="inline-flex items-center gap-1 text-[11px] text-[#888]">
                             <MessageSquare className="h-3 w-3" />
                             {video.commentCount}
+                            {video.commentCountIsCapped ? "+" : ""}
                           </span>
                         )}
                         {watchingCount > 0 && (
@@ -807,6 +810,7 @@ export default function ProjectPage({
                         <span className="inline-flex items-center gap-1 text-xs text-[#888]">
                           <MessageSquare className="h-3.5 w-3.5" />
                           {video.commentCount}
+                          {video.commentCountIsCapped ? "+" : ""}
                         </span>
                       )}
                       {watchingCount > 0 && (
@@ -891,6 +895,17 @@ export default function ProjectPage({
                 </VideoIntentTarget>
               );
             })}
+          </div>
+        )}
+        {(videosStatus === "CanLoadMore" || videosStatus === "LoadingMore") && (
+          <div className="flex justify-center px-6 pb-6">
+            <Button
+              variant="outline"
+              disabled={videosStatus === "LoadingMore"}
+              onClick={loadMoreVideos}
+            >
+              {videosStatus === "LoadingMore" ? "Loading..." : "Load more videos"}
+            </Button>
           </div>
         )}
       </div>

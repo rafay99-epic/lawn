@@ -8,6 +8,7 @@ import { createVersionRecord, MAX_VIDEO_STACK_SIZE } from "./videos";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+const testPagination = { cursor: null, numItems: 1_000 };
 
 test("materializes v1 and appends after the actual latest version", async () => {
   const t = convexTest(schema, modules);
@@ -101,8 +102,9 @@ test("materializes v1 and appends after the actual latest version", async () => 
 
   const visible = await t.withIdentity({ subject: "user_1" }).query(api.videos.list, {
     projectId: seeded.projectId,
+    paginationOpts: testPagination,
   });
-  expect(visible.map((video) => [video._id, video.versionNumber])).toEqual([[v3, 3]]);
+  expect(visible.page.map((video) => [video._id, video.versionNumber])).toEqual([[v3, 3]]);
 });
 
 test("selects the stack head independently of version number ordering", async () => {
@@ -438,8 +440,9 @@ test("moves the whole stack and rewires middle and latest deletions", async () =
 
   const visible = await authed.query(api.videos.list, {
     projectId: seeded.destinationProjectId,
+    paginationOpts: testPagination,
   });
-  expect(visible.map((video) => [video._id, video.versionNumber])).toEqual([[seeded.v1, 1]]);
+  expect(visible.page.map((video) => [video._id, video.versionNumber])).toEqual([[seeded.v1, 1]]);
 });
 
 test("refuses to move a stack whose versions do not share the source project", async () => {
@@ -614,8 +617,11 @@ test("deleting v1 preserves stable identities and supports creating the next ver
     versionNumber: 3,
   });
 
-  const visible = await authed.query(api.videos.list, { projectId: seeded.projectId });
-  expect(visible.map((video) => video._id)).toEqual([v4]);
+  const visible = await authed.query(api.videos.list, {
+    projectId: seeded.projectId,
+    paginationOpts: testPagination,
+  });
+  expect(visible.page.map((video) => video._id)).toEqual([v4]);
 });
 
 test("deletes dependents in resumable batches after removing the version row", async () => {
@@ -913,8 +919,8 @@ test("storage counts every stored version while project lists only the head", as
   await expect(t.run((ctx) => getTeamStorageUsedBytes(ctx, seeded.teamId))).resolves.toBe(300);
   const listed = await t
     .withIdentity({ subject: "owner" })
-    .query(api.videos.list, { projectId: seeded.projectId });
-  expect(listed.map((video) => video._id)).toEqual([v2]);
+    .query(api.videos.list, { projectId: seeded.projectId, paginationOpts: testPagination });
+  expect(listed.page.map((video) => video._id)).toEqual([v2]);
 });
 
 test("public version paths enforce authentication and member authorization", async () => {
@@ -1035,8 +1041,8 @@ test("abandoned version uploads atomically restore the previous head", async () 
 
   const visible = await t
     .withIdentity({ subject: "owner" })
-    .query(api.videos.list, { projectId: seeded.projectId });
-  expect(visible.map((video) => video._id)).toEqual([seeded.v1]);
+    .query(api.videos.list, { projectId: seeded.projectId, paginationOpts: testPagination });
+  expect(visible.page.map((video) => video._id)).toEqual([seeded.v1]);
 });
 
 test("rolling back a provisional middle version renumbers and remains appendable", async () => {
@@ -1278,8 +1284,8 @@ test("failure after Mux promotion stays retryable as the latest version", async 
 
   const listed = await t
     .withIdentity({ subject: "owner" })
-    .query(api.videos.list, { projectId: seeded.projectId });
-  expect(listed.map((video) => video._id)).toEqual([v2]);
+    .query(api.videos.list, { projectId: seeded.projectId, paginationOpts: testPagination });
+  expect(listed.page.map((video) => video._id)).toEqual([v2]);
 });
 
 test("abandoned upload with a Mux asset exercises the kept-as-failed branch", async () => {

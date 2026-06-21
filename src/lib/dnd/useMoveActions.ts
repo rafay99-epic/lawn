@@ -18,12 +18,11 @@ export function useMoveActions() {
     // (its source folder), so the card vanishes from the current view instantly.
     for (const { args, value } of localStore.getAllQueries(api.videos.list)) {
       if (!value) continue;
-      if (!value.some((video) => video._id === videoId)) continue;
-      localStore.setQuery(
-        api.videos.list,
-        args,
-        value.filter((video) => video._id !== videoId),
-      );
+      if (!value.page.some((video) => video._id === videoId)) continue;
+      localStore.setQuery(api.videos.list, args, {
+        ...value,
+        page: value.page.filter((video) => video._id !== videoId),
+      });
     }
   });
 

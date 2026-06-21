@@ -124,10 +124,7 @@ function buildFolderPath(
 /** Number of videos and direct child folders for a folder (for card badges).
  *  Counts are capped at 100 via .take(101) so a folder with thousands of items
  *  doesn't materialize them all just to read .length. */
-async function folderCounts(
-  ctx: QueryCtx,
-  project: Doc<"projects">,
-): Promise<{ videoCount: number; subfolderCount: number }> {
+async function folderCounts(ctx: QueryCtx, project: Doc<"projects">) {
   const videoPage = await ctx.db
     .query("videos")
     .withIndex("by_project_and_superseded_by_video_id", (q) =>
@@ -143,6 +140,8 @@ async function folderCounts(
   return {
     videoCount: videoPage.length === 101 ? 100 : videoPage.length,
     subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
+    videoCountIsCapped: videoPage.length === 101,
+    subfolderCountIsCapped: subfolderPage.length === 101,
   };
 }
 

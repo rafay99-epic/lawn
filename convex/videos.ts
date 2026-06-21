@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import {
   internalMutation,
   internalQuery,
@@ -541,20 +542,23 @@ export const createVersion = mutation({
 });
 
 export const list = query({
-  args: { projectId: v.id("projects") },
+  args: {
+    projectId: v.id("projects"),
+    paginationOpts: paginationOptsValidator,
+  },
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId);
 
-    const videos = await ctx.db
+    const result = await ctx.db
       .query("videos")
       .withIndex("by_project_and_superseded_by_video_id", (q) =>
         q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
       )
       .order("desc")
-      .take(200);
+      .paginate(args.paginationOpts);
 
-    return await Promise.all(
-      videos.map(async (video) => {
+    const page = await Promise.all(
+      result.page.map(async (video) => {
         // Cap the per-video comment count scan at 201 so a video with thousands
         // of comments doesn't materialize them all just to read .length.
         const commentPage = await ctx.db
@@ -568,9 +572,12 @@ export const list = query({
           workflowStatus: normalizeWorkflowStatus(video.workflowStatus),
           versionNumber: normalizeVersionNumber(video),
           commentCount: commentPage.length === 201 ? 200 : commentPage.length,
+          commentCountIsCapped: commentPage.length === 201,
         };
       }),
     );
+
+    return { ...result, page };
   },
 });
 
@@ -1295,15 +1302,33 @@ export const listStaleUploadCandidates = internalQuery({
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    // All uploading videos set uploadUpdatedAt at creation time (create /
-    // insertVersionRecord / setUploadInfo), so the field is never undefined for
-    // status === "uploading" and the index range covers every candidate.
-    const candidates = await ctx.db
+    // New writes always populate uploadUpdatedAt, but retain an explicit
+    // compatibility path for uploads created before that field existed.
+    const legacyCandidates = await ctx.db
       .query("videos")
       .withIndex("by_status_and_upload_updated_at", (q) =>
-        q.eq("status", "uploading").lt("uploadUpdatedAt", args.cutoff),
+        q
+          .eq("status", "uploading")
+          .eq("uploadUpdatedAt", undefined)
+          .lt("_creationTime", args.cutoff),
       )
       .take(args.limit);
+
+    const remaining = args.limit - legacyCandidates.length;
+    const datedCandidates =
+      remaining > 0
+        ? await ctx.db
+            .query("videos")
+            .withIndex("by_status_and_upload_updated_at", (q) =>
+              q
+                .eq("status", "uploading")
+                .gte("uploadUpdatedAt", 0)
+                .lt("uploadUpdatedAt", args.cutoff),
+            )
+            .take(remaining)
+        : [];
+
+    const candidates = [...legacyCandidates, ...datedCandidates];
 
     return candidates.map((video) => ({ videoId: video._id }));
   },
@@ -1478,7 +1503,13 @@ export const claimMuxProcessingCandidates = internalMutation({
     const claimedAt = Date.now();
     const candidates = [];
     for (const video of videos) {
-      if (!video.muxAssetId) continue;
+      if (!video.muxAssetId) {
+        // Rotate interrupted processing rows to the back of the queue. Without
+        // this write, enough asset-less rows can permanently hide valid work
+        // beyond the bounded scan window.
+        await ctx.db.patch(video._id, { muxLastPolledAt: claimedAt });
+        continue;
+      }
       await ctx.db.patch(video._id, { muxLastPolledAt: claimedAt });
       candidates.push({
         videoId: video._id,
