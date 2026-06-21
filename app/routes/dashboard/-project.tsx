@@ -900,7 +900,7 @@ export default function ProjectPage({
         {(videosStatus === "CanLoadMore" || videosStatus === "LoadingMore") && (
           <div className="flex justify-center px-6 pb-6">
             <Button
-              variant="outline"
+              variant="primary"
               disabled={videosStatus === "LoadingMore"}
               onClick={loadMoreVideos}
             >

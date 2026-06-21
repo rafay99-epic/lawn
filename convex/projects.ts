@@ -125,18 +125,20 @@ function buildFolderPath(
  *  Counts are capped at 100 via .take(101) so a folder with thousands of items
  *  doesn't materialize them all just to read .length. */
 async function folderCounts(ctx: QueryCtx, project: Doc<"projects">) {
-  const videoPage = await ctx.db
-    .query("videos")
-    .withIndex("by_project_and_superseded_by_video_id", (q) =>
-      q.eq("projectId", project._id).eq("supersededByVideoId", undefined),
-    )
-    .take(101);
-  const subfolderPage = await ctx.db
-    .query("projects")
-    .withIndex("by_team_and_parent", (q) =>
-      q.eq("teamId", project.teamId).eq("parentId", project._id),
-    )
-    .take(101);
+  const [videoPage, subfolderPage] = await Promise.all([
+    ctx.db
+      .query("videos")
+      .withIndex("by_project_and_superseded_by_video_id", (q) =>
+        q.eq("projectId", project._id).eq("supersededByVideoId", undefined),
+      )
+      .take(101),
+    ctx.db
+      .query("projects")
+      .withIndex("by_team_and_parent", (q) =>
+        q.eq("teamId", project.teamId).eq("parentId", project._id),
+      )
+      .take(101),
+  ]);
   return {
     videoCount: videoPage.length === 101 ? 100 : videoPage.length,
     subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
