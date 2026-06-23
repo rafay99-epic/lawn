@@ -16,8 +16,13 @@ export function sortDashboardItems<T extends DashboardSortableItem>(
 ) {
   return [...items].sort((a, b) => {
     if (sort === "last-uploaded") {
-      const recency = (b.lastUploadedAt ?? -Infinity) - (a.lastUploadedAt ?? -Infinity);
-      if (recency !== 0) return recency;
+      if (a.lastUploadedAt === undefined || b.lastUploadedAt === undefined) {
+        if (a.lastUploadedAt !== b.lastUploadedAt) {
+          return a.lastUploadedAt === undefined ? 1 : -1;
+        }
+      } else if (a.lastUploadedAt !== b.lastUploadedAt) {
+        return a.lastUploadedAt < b.lastUploadedAt ? 1 : -1;
+      }
     }
 
     const aName = normalizeDashboardSortText(a.name);
