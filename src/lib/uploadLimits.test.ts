@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  GIBIBYTE as SERVER_GIBIBYTE,
+  LEGACY_SINGLE_PUT_MAX_BYTES,
   MAX_VIDEO_FILE_SIZE_BYTES,
   MEBIBYTE as SERVER_MEBIBYTE,
   SINGLE_PUT_MAX_BYTES as SERVER_SINGLE_PUT_MAX_BYTES,
   assertVideoFileSizeAllowed,
+  isAboveLegacySinglePutMaxBytes,
   usesMultipartUpload,
 } from "@convex/uploadLimits";
 import {
@@ -34,4 +37,13 @@ test("client and server switch to multipart above 256 MiB", () => {
   assert.equal(SERVER_SINGLE_PUT_MAX_BYTES, threshold);
   assert.equal(usesMultipartUpload(threshold), false);
   assert.equal(usesMultipartUpload(threshold + 1), true);
+});
+
+test("legacy already-uploaded compatibility only applies above the old 5 GiB ceiling", () => {
+  const oldThreshold = 5 * SERVER_GIBIBYTE;
+
+  assert.equal(LEGACY_SINGLE_PUT_MAX_BYTES, oldThreshold);
+  assert.equal(isAboveLegacySinglePutMaxBytes(SERVER_SINGLE_PUT_MAX_BYTES + 1), false);
+  assert.equal(isAboveLegacySinglePutMaxBytes(oldThreshold), false);
+  assert.equal(isAboveLegacySinglePutMaxBytes(oldThreshold + 1), true);
 });
