@@ -38,6 +38,7 @@ import {
   STALE_UPLOAD_SWEEP_BATCH_SIZE,
   STALE_UPLOAD_THRESHOLD_MS,
   assertVideoFileSizeAllowed,
+  isAboveLegacySinglePutMaxBytes,
   usesMultipartUpload,
 } from "./uploadLimits";
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
@@ -426,6 +427,7 @@ export const initiateVideoUpload = action({
 
     if (usesMultipartUpload(args.fileSize)) {
       if (
+        isAboveLegacySinglePutMaxBytes(args.fileSize) &&
         (video.status === "uploading" || video.status === "failed") &&
         video.s3Key &&
         !video.s3MultipartUploadId &&
