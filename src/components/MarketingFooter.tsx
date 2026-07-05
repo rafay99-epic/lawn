@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { paymentsEnabled } from "@/lib/featureFlags";
 
 export function MarketingFooter() {
   return (
@@ -10,14 +11,16 @@ export function MarketingFooter() {
               Product
             </h3>
             <ul className="space-y-3 text-sm font-bold">
-              <li>
-                <Link to="/pricing" className="transition-colors hover:text-[#7cb87c]">
-                  Pricing
-                </Link>
-              </li>
+              {paymentsEnabled && (
+                <li>
+                  <Link to="/pricing" className="transition-colors hover:text-[#7cb87c]">
+                    Pricing
+                  </Link>
+                </li>
+              )}
               <li>
                 <Link to="/sign-up" className="transition-colors hover:text-[#7cb87c]">
-                  Start free trial
+                  {paymentsEnabled ? "Start free trial" : "Get started"}
                 </Link>
               </li>
               <li>

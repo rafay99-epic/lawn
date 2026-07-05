@@ -8,6 +8,7 @@ import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { teamHomePath, teamSettingsPath, projectPath } from "@/lib/routes";
+import { paymentsEnabled } from "@/lib/featureFlags";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { useDashboardIndexData } from "./-index.data";
@@ -163,20 +164,22 @@ export default function DashboardPage() {
                 <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-black text-[#1a1a1a]">{team.name}</h2>
-                    <Badge variant="secondary">
-                      {formatTeamPlanLabel(
-                        team.plan,
-                        team.billingStatus,
-                        team.stripeSubscriptionId,
-                      )}
-                    </Badge>
+                    {paymentsEnabled && (
+                      <Badge variant="secondary">
+                        {formatTeamPlanLabel(
+                          team.plan,
+                          team.billingStatus,
+                          team.stripeSubscriptionId,
+                        )}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-4">
                     <Link
                       to={teamSettingsPath(team.slug)}
                       className="text-sm font-bold text-[#888] transition-colors hover:text-[#1a1a1a]"
                     >
-                      Billing
+                      {paymentsEnabled ? "Billing" : "Settings"}
                     </Link>
                     <Link
                       to={teamHomePath(team.slug)}

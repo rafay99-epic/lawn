@@ -13,10 +13,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Folder, Plus, Users, CreditCard } from "lucide-react";
+import { Folder, Plus, Users, CreditCard, Settings } from "lucide-react";
 import { MemberInvite } from "@/components/teams/MemberInvite";
 import { cn } from "@/lib/utils";
 import { projectPath, teamSettingsPath } from "@/lib/routes";
+import { paymentsEnabled } from "@/lib/featureFlags";
 import { Id } from "@convex/_generated/dataModel";
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
@@ -136,7 +137,7 @@ export default function TeamPage() {
   const canManageMembers = team?.role === "owner" || team?.role === "admin";
   const hasActiveSubscription = billing?.hasActiveSubscription ?? false;
   const canCreateProject = team?.role !== "viewer" && hasActiveSubscription;
-  const canAccessBilling = team?.role === "owner";
+  const canAccessBilling = team?.role === "owner" && paymentsEnabled;
   const billingPath = team ? teamSettingsPath(team.slug) : null;
 
   return (
@@ -144,13 +145,17 @@ export default function TeamPage() {
       {/* Header */}
       <DashboardHeader paths={[{ label: team?.slug ?? "team" }]}>
         <DashboardSortControl value={sort} onChange={setSort} />
-        {canAccessBilling && team && (
+        {team?.role === "owner" && team && (
           <Button
             variant="outline"
             onClick={() => navigate({ to: billingPath ?? teamSettingsPath(team.slug) })}
           >
-            <CreditCard className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">Billing</span>
+            {paymentsEnabled ? (
+              <CreditCard className="h-4 w-4 sm:mr-1.5" />
+            ) : (
+              <Settings className="h-4 w-4 sm:mr-1.5" />
+            )}
+            <span className="hidden sm:inline">{paymentsEnabled ? "Billing" : "Settings"}</span>
           </Button>
         )}
         {canManageMembers && (

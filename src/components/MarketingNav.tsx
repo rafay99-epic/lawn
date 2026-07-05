@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
+import { paymentsEnabled } from "@/lib/featureFlags";
 
 export function MarketingNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -22,9 +23,11 @@ export function MarketingNav() {
         </Link>
       </div>
       <div className="flex items-center gap-6 text-sm font-bold tracking-wide uppercase">
-        <Link to="/pricing" className="hidden underline-offset-4 hover:underline sm:block">
-          Pricing
-        </Link>
+        {paymentsEnabled && (
+          <Link to="/pricing" className="hidden underline-offset-4 hover:underline sm:block">
+            Pricing
+          </Link>
+        )}
         <Link to="/compare/frameio" className="hidden underline-offset-4 hover:underline sm:block">
           Compare
         </Link>

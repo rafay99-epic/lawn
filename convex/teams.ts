@@ -8,7 +8,7 @@ import {
   requireUser,
   requireTeamAccess,
 } from "./auth";
-import { getTeamSubscriptionState } from "./billingHelpers";
+import { getTeamSubscriptionState, paymentsEnabled } from "./billingHelpers";
 import { deleteVideoAndDependents } from "./videos";
 
 function normalizedEmail(value: string) {
@@ -420,7 +420,7 @@ export const deleteTeam = mutation({
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "owner");
     const subscriptionState = await getTeamSubscriptionState(ctx, args.teamId);
-    if (subscriptionState.hasActiveSubscription) {
+    if (paymentsEnabled() && subscriptionState.hasActiveSubscription) {
       throw new Error(
         "Cannot delete a team with an active subscription. Cancel billing first in team settings.",
       );

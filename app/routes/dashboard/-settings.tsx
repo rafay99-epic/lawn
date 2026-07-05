@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { CreditCard, Trash2, Check, Pencil } from "lucide-react";
 import { MemberInvite } from "@/components/teams/MemberInvite";
 import { dashboardHomePath, teamHomePath } from "@/lib/routes";
+import { paymentsEnabled } from "@/lib/featureFlags";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { useSettingsData } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
@@ -101,6 +102,7 @@ export default function TeamSettingsPage() {
   }, [shouldCanonicalize, canonicalSettingsPath, navigate]);
 
   useEffect(() => {
+    if (!paymentsEnabled) return;
     if (!team || team.role !== "owner") return;
     if (reconciledTeamIdRef.current === team._id) return;
 
@@ -135,7 +137,8 @@ export default function TeamSettingsPage() {
   const isTrialing = subscriptionStatus === "trialing";
   const hasPortalAccess = isOwner && Boolean(billing?.stripeCustomerId);
   const currentPlanLabel = hasActiveSubscription ? planConfig.label : "Unpaid";
-  const canDeleteTeam = isOwner && !hasActiveSubscription;
+  // When payments are disabled there is no subscription to cancel first.
+  const canDeleteTeam = isOwner && (!paymentsEnabled || !hasActiveSubscription);
 
   const storageUsed = billing?.storageUsedBytes ?? 0;
   const storageLimit = planConfig.storageLimitBytes;
@@ -152,7 +155,7 @@ export default function TeamSettingsPage() {
   };
 
   const handleDeleteTeam = async () => {
-    if (hasActiveSubscription) {
+    if (paymentsEnabled && hasActiveSubscription) {
       setBillingError(
         "Cancel the team's active subscription in billing before deleting this team.",
       );
@@ -320,24 +323,26 @@ export default function TeamSettingsPage() {
 
           {/* ── Stats strip ── */}
           <div className="mb-8 grid grid-cols-1 gap-4 border-t-2 border-b-2 border-[#1a1a1a] py-5 sm:grid-cols-3 sm:gap-6 lg:gap-12">
-            <div>
-              <p className="mb-1 text-[10px] tracking-[0.2em] text-[#888] uppercase">Plan</p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black text-[#1a1a1a]">{currentPlanLabel}</span>
-                {hasActiveSubscription ? (
-                  <Badge variant={isTrialing ? "warning" : "success"}>
-                    {isTrialing ? "Trialing" : "Active"}
-                  </Badge>
-                ) : (
-                  <Badge variant="warning">{subscriptionStatus}</Badge>
+            {paymentsEnabled && (
+              <div>
+                <p className="mb-1 text-[10px] tracking-[0.2em] text-[#888] uppercase">Plan</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-black text-[#1a1a1a]">{currentPlanLabel}</span>
+                  {hasActiveSubscription ? (
+                    <Badge variant={isTrialing ? "warning" : "success"}>
+                      {isTrialing ? "Trialing" : "Active"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning">{subscriptionStatus}</Badge>
+                  )}
+                </div>
+                {isTrialing && typeof billing?.currentPeriodEnd === "number" && (
+                  <p className="mt-2 text-xs text-[#888]">
+                    Trial ends {formatUtcDateFromUnixSeconds(billing.currentPeriodEnd)} UTC
+                  </p>
                 )}
               </div>
-              {isTrialing && typeof billing?.currentPeriodEnd === "number" && (
-                <p className="mt-2 text-xs text-[#888]">
-                  Trial ends {formatUtcDateFromUnixSeconds(billing.currentPeriodEnd)} UTC
-                </p>
-              )}
-            </div>
+            )}
             <div>
               <p className="mb-1 text-[10px] tracking-[0.2em] text-[#888] uppercase">Storage</p>
               <p className="text-xl font-black text-[#1a1a1a]">
@@ -363,6 +368,7 @@ export default function TeamSettingsPage() {
           {/* ── Two-column: Plans + Members ── */}
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-5 lg:gap-12">
             {/* Plans column */}
+            {paymentsEnabled && (
             <div className="lg:col-span-3">
               <h2 className="mb-4 text-[10px] font-bold tracking-[0.2em] text-[#888] uppercase">
                 Plans
@@ -464,9 +470,10 @@ export default function TeamSettingsPage() {
                 </p>
               )}
             </div>
+            )}
 
             {/* Members column */}
-            <div className="lg:col-span-2">
+            <div className={paymentsEnabled ? "lg:col-span-2" : "lg:col-span-5"}>
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-[10px] font-bold tracking-[0.2em] text-[#888] uppercase">
                   Members

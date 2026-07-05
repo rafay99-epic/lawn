@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/tanstack-react-start";
 import { Link } from "@tanstack/react-router";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { dashboardHomePath } from "@/lib/routes";
+import { paymentsEnabled } from "@/lib/featureFlags";
 
 function HomeNavActions({ scrolled }: { scrolled: boolean }) {
   const { isLoaded, userId } = useAuth();
@@ -76,9 +77,11 @@ export default function Homepage() {
           </span>
         </div>
         <div className="flex items-center gap-6 text-sm font-bold tracking-wide uppercase">
-          <a href="#pricing" className="underline-offset-4 hover:underline">
-            Pricing
-          </a>
+          {paymentsEnabled && (
+            <a href="#pricing" className="underline-offset-4 hover:underline">
+              Pricing
+            </a>
+          )}
           <Link
             to="/compare/frameio"
             className={`hidden underline-offset-4 hover:underline sm:block`}
@@ -342,6 +345,7 @@ export default function Homepage() {
       </section>
 
       {/* Pricing */}
+      {paymentsEnabled && (
       <section
         id="pricing"
         className="border-b-2 border-[#1a1a1a] bg-[#e8e8e0] px-6 py-24 md:py-32"
@@ -429,6 +433,7 @@ export default function Homepage() {
           </div>
         </div>
       </section>
+      )}
 
       {/* Massive CTA */}
       <section className="bg-[#f0f0e8] px-6 py-32">
@@ -439,7 +444,9 @@ export default function Homepage() {
             NOW.
           </h2>
           <p className="mb-12 text-2xl font-medium text-[#888]">
-            Basic is $5/month. Pro is $25/month.
+            {paymentsEnabled
+              ? "Basic is $5/month. Pro is $25/month."
+              : "Video review for creative teams."}
           </p>
           <Link
             to="/sign-up"
@@ -465,23 +472,28 @@ export default function Homepage() {
             url: "https://lawn.video",
             applicationCategory: "MultimediaApplication",
             operatingSystem: "Web",
-            offers: [
-              {
-                "@type": "Offer",
-                name: "Basic",
-                price: "5.00",
-                priceCurrency: "USD",
-                description:
-                  "Unlimited seats, unlimited projects, unlimited clients, 100GB storage",
-              },
-              {
-                "@type": "Offer",
-                name: "Pro",
-                price: "25.00",
-                priceCurrency: "USD",
-                description: "Unlimited seats, unlimited projects, unlimited clients, 1TB storage",
-              },
-            ],
+            ...(paymentsEnabled
+              ? {
+                  offers: [
+                    {
+                      "@type": "Offer",
+                      name: "Basic",
+                      price: "5.00",
+                      priceCurrency: "USD",
+                      description:
+                        "Unlimited seats, unlimited projects, unlimited clients, 100GB storage",
+                    },
+                    {
+                      "@type": "Offer",
+                      name: "Pro",
+                      price: "25.00",
+                      priceCurrency: "USD",
+                      description:
+                        "Unlimited seats, unlimited projects, unlimited clients, 1TB storage",
+                    },
+                  ],
+                }
+              : {}),
             creator: {
               "@type": "Person",
               name: "Theo",

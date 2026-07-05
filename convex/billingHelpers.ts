@@ -20,6 +20,16 @@ function hasText(value: string | undefined | null): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+/**
+ * Feature flag: when PAYMENTS_ENABLED is set to "false" (Convex deployment env
+ * var), all Stripe/subscription enforcement is bypassed and every team is
+ * treated as having unlimited, always-active access. Defaults to enabled so
+ * upstream behavior is preserved unless explicitly turned off.
+ */
+export function paymentsEnabled(): boolean {
+  return process.env.PAYMENTS_ENABLED !== "false";
+}
+
 export function normalizeStoredTeamPlan(plan: string): TeamPlan {
   if (plan === "pro" || plan === "team") return "pro";
   return "basic";
@@ -70,7 +80,12 @@ export async function getTeamSubscriptionState(ctx: BillingCtx, teamId: Id<"team
 
   const subscriptionPlan = resolvePlanFromStripePriceId(subscription?.priceId);
   const plan = subscriptionPlan ?? normalizeStoredTeamPlan(team.plan);
-  const hasActiveSubscription = hasActiveTeamSubscriptionStatus(subscription?.status);
+  // When payments are disabled, every team reads as actively subscribed so that
+  // both the backend gates below and the frontend paywall (which reads this via
+  // getTeamBilling.hasActiveSubscription) are lifted.
+  const hasActiveSubscription = paymentsEnabled()
+    ? hasActiveTeamSubscriptionStatus(subscription?.status)
+    : true;
 
   return { team, subscription, plan, hasActiveSubscription };
 }
@@ -122,6 +137,15 @@ export async function assertTeamCanStoreBytes(
   ]);
   const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
   const requestedBytes = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
+
+  // Payments disabled: no active-subscription requirement and no storage cap.
+  if (!paymentsEnabled()) {
+    return {
+      ...state,
+      storageUsedBytes,
+      storageLimitBytes,
+    };
+  }
 
   if (storageUsedBytes + requestedBytes > storageLimitBytes) {
     throw new Error(
